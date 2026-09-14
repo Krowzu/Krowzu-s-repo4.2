@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clement RAGEADE ~ portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="terminal">
+  <div class="titlebar">
+    <div class="title">Clement-RAGEADE: ~/portfolio</div>
+  </div>
+
+  <div class="term-body">
+    <div class="wrap">
+
+      <!-- NEOFETCH HERO -->
+      <div class="neofetch">
+        <pre class="ascii">         _nnnn_
+        dGGGGMMb
+       @p~qp~~qMb
+       M|@| |@)M|
+       @,----.JM|
+      JS^\__/  qKL
+     dZP        qKRb
+    dZP          qKKb
+   fZP            SMMb
+   HZM            MMMM
+   FqM            MMMM
+ __| ".        |\dS"qML
+ |    `.       | `' \Zq
+_)      \.___.,|     .'
+\____   )MMMMMP|   .'
+     `-'       `--' 
+</pre>
+        <div class="info">
+          <div class="name"><span class="u">Clement</span>@RAGEADE</div>
+          <div class="rule"></div>
+          <div class="row"><span class="k">OS</span><span class="v">Étudiant en Cybersécurité</span></div>
+          <div class="row"><span class="k">Host</span><span class="v">Bordeaux, France</span></div>
+          <div class="row"><span class="k">Uptime</span><span class="v">1er année — Cybersécurité</span></div>
+          <div class="row"><span class="k">Packages</span><span class="v">Assembeur, HTML, CSS, Pyton, Bash</span></div>
+          <div class="row"><span class="k">Terminal</span><span class="v">Ptyxis</span></div>
+          <div class="row"><span class="k">Status</span><span class="v">Etudiant</span></div>
+          <div class="swatches">
+            <span style="background:#5CC8FF"></span>
+            <span style="background:#8FD97A"></span>
+            <span style="background:#D28FE0"></span>
+            <span style="background:#E0C46C"></span>
+            <span style="background:#D3D7DE"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- info -->
+      <section id="about">
+        <div class="prompt">
+          <span class="user">Clement</span><span class="at">@</span><span class="host">RAGEADE</span>
+          <span class="sym">/portfolio</span><span class="sym">/</span>
+          <span class="cmd">info</span>
+        </div>
+        <div class="comment">affiche les informations personnelles</div>
+        <p>#####################################################################</p>
+        <p>#####################################################################</p>
+        <div class="flags">
+          <div class="row"><span class="flag">--formation</span><span class="val">Cybersécurité &amp; Réseaux &amp; Hardware</span></div>
+          <div class="row"><span class="flag">--environnements</span><span class="val">Linux</span></div>
+          <div class="row"><span class="flag">--langues</span><span class="val">Français, Anglais bancal</span></div>
+        </div>
+      </section>
+
+      <!-- PROJECTS -->
+      <section id="work">
+        <div class="prompt">
+          <span class="user">Clement</span><span class="at">@</span><span class="host">RAGEADE</span>
+          <span class="sym">/portfolio</span><span class="sym">/</span>
+          <span class="cmd">parcours</span>
+        </div>
+        <div class="listing">
+          <div class="head">Scolarité</div>
+
+          <div class="lrow">
+            <span class="perm">post-bac</span>
+            <span class="size">2026-2031</span>
+            <span class="date">###</span>
+            <span class="name">lab_active_directory/</span>
+            <span class="desc">Bac+5 en cybersécurité</span>
+            <span class="tags"><span>active directory</span><span>SIEM</span></span>
+          </div>
+
+          <div class="lrow">
+            <span class="perm">Lycée</span>
+            <span class="size">2023-2026</span>
+            <span class="date">###</span>
+            <span class="name">stage_soc/</span>
+            <span class="desc">2nd Général 2023-2024 au Lycée Max linder à Libourne. 1ere & Terminal Techno STI2D_Sin 2024-2026 Lycée Sainte Famille.</span>
+            <span class="tags"><span>SOC</span><span>analyse de logs</span></span>
+          </div>
+
+          <div class="lrow">
+            <span class="perm">Collège</span>
+            <span class="size">2019-2023</span>
+            <span class="date">###</span>
+            <span class="name">ctf_bugbounty/</span>
+            <span class="desc">College les dagueys Libourne 2019-2023</span>
+            <span class="tags"><span>web</span><span>reverse</span></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROJECTS -->
+      <section id="skills">
+        <div class="prompt">
+          <span class="user">Clement</span><span class="at">@</span><span class="host">RAGEADE</span>
+          <span class="sym">/portfolio</span><span class="sym">/</span>
+          <span class="cmd">project</span>
+        </div>
+        <div class="skill-out">
+          <span class="k">Serveur minecraft</span>
+          <span class="bar"><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="lvl-txt">Fait et refait</span></span>
+
+          <span class="k">Ce portfolio</span>
+          <span class="bar"><span class="cell on"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="lvl-txt">Début</span></span>
+
+          <span class="k">Bootloader</span>
+          <span class="bar"><span class="cell on"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="lvl-txt">Début</span></span>
+
+        </div>
+      </section>
+
+      <!-- CONTACT -->
+      <section id="contact">
+        <div class="prompt">
+          <span class="user">Clement</span><span class="at">@</span><span class="host">RAGEADE</span>
+          <span class="sym">/portfolio</span><span class="sym">/</span>
+          <span class="cmd">contact</span>
+        </div>
+        <div class="out">#############</div>
+        <div class="contact-links">
+          <a href="mailto:clem.rageade@gmail.com">mail: clem.rageade@gmail.com</a>
+          
+        </div>
+
+        <div class="prompt final-prompt">
+          <span class="user">Clement</span><span class="at">@</span><span class="host">RAGEADE</span>
+          <span class="sym">/portfolio</span><span class="sym">/</span>
+          <span class="cursor"></span>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<footer>portfolio.sh — rev 2026.07 — exécuté sur arch linux</footer>
+
+</body>
+</html>
