@@ -1,0 +1,23 @@
+a gerder
+
+
+
+      <!-- COMPETENCES -->
+      <section id="skills" class="tab-panel">
+        <div class="prompt">
+          <span class="user">Krowzu</span><span class="at"></span><span class="host"></span>
+          <span class="sym"></span><span class="sym">/</span>
+          <span class="cmd">competences</span>
+        </div>
+        <div class="skill-out">
+          <span class="k">Serveur minecraft</span>
+          <span class="bar"><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="lvl-txt">Fait et refait</span></span>
+
+          <span class="k">Ce portfolio</span>
+          <span class="bar"><span class="cell on"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="lvl-txt">Début</span></span>
+
+          <span class="k">Bootloader</span>
+          <span class="bar"><span class="cell on"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="lvl-txt">Début</span></span>
+
+        </div>
+      </section>
