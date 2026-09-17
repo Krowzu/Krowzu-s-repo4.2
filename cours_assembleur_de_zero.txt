@@ -1,0 +1,5580 @@
+================================================================================
+                 APPRENDRE L'ASSEMBLEUR x86-64 DE ZÉRO
+          Avec NASM sous Linux, un gros chapitre sur les adresses et la
+         mémoire, et un chapitre complet sans système d'exploitation
+================================================================================
+
+SOMMAIRE
+
+   0. Avant de commencer : c'est quoi l'assembleur, installation, outils
+   1. Le premier programme
+   2. Les nombres comme les voit le processeur
+   3. Le processeur et ses registres
+   4. Sections, données et étiquettes
+   5. Les instructions de base : mov et l'arithmétique
+   6. LES ADRESSES ET L'ACCÈS À LA MÉMOIRE (les "pointeurs" de l'assembleur)
+   7. Les opérations sur les bits
+   8. Sauts, conditions et boucles
+   9. La pile
+  10. Les fonctions et la convention d'appel
+  11. Les appels système Linux (afficher, lire, fichiers, mémoire)
+  12. Les instructions de chaînes (rep movsb et compagnie)
+  13. Les macros et le préprocesseur de NASM
+  14. Mélanger assembleur et C
+  15. Les nombres à virgule (SSE) en bref
+  16. Déboguer un programme en assembleur
+  17. L'ASSEMBLEUR SANS SYSTÈME D'EXPLOITATION : du secteur d'amorçage au
+      mode long 64 bits, écran, clavier, CPUID, RAM, interruptions
+  18. Annexes : récapitulatifs, erreurs fréquentes, tableau C / assembleur
+  19. Corrigés des exercices
+
+Comment utiliser ce cours : lis un chapitre, tape les exemples toi-même,
+assemble-les, exécute-les, puis casse-les exprès pour voir ce qui se passe.
+En assembleur, l'outil le plus important après l'éditeur est le débogueur
+(chapitre 16) : n'hésite pas à le découvrir tôt pour regarder les registres
+changer instruction après instruction.
+
+Tous les programmes complets de ce cours ont été assemblés et exécutés. Ils
+sont repérables à leurs lignes "; ===== fichier xxx.asm =====".
+
+
+================================================================================
+ 0. AVANT DE COMMENCER
+================================================================================
+
+0.1 C'est quoi l'assembleur ?
+-----------------------------
+Le processeur n'exécute qu'une seule chose : du LANGAGE MACHINE, une suite
+d'octets. Par exemple, les octets
+
+   B8 2A 00 00 00
+
+signifient pour un processeur x86 : "mets la valeur 42 dans le registre eax".
+Personne ne veut écrire des octets à la main. L'ASSEMBLEUR est la version
+lisible du langage machine : chaque instruction a un nom court (un
+MNÉMONIQUE), et le programme qui traduit (lui aussi appelé "assembleur")
+remplace chaque ligne par ses octets.
+
+   mov eax, 42         ; devient B8 2A 00 00 00
+
+Différences avec le C :
+   - Une ligne d'assembleur = en général UNE instruction du processeur.
+     Une ligne de C peut en produire des dizaines.
+   - Pas de types, pas de variables au sens du C : il y a des REGISTRES
+     (quelques cases de mémoire ultra-rapides dans le processeur) et des
+     OCTETS en mémoire. C'est toi qui décides comment les interpréter.
+   - Pas de if, de while ou de for : seulement des comparaisons et des SAUTS.
+   - Pas portable : l'assembleur x86-64 ne marche que sur les processeurs
+     x86-64 (Intel, AMD). Un processeur ARM (téléphone, Mac récent, Raspberry
+     Pi) a un autre jeu d'instructions.
+
+0.2 Pourquoi l'apprendre ?
+--------------------------
+   - Comprendre ce que fait VRAIMENT un programme C, Rust ou autre.
+   - Écrire ce qui ne peut être écrit qu'en assembleur : le démarrage d'un
+     ordinateur, le passage du processeur en mode 64 bits, les routines
+     d'interruption, le changement de contexte d'un système d'exploitation.
+   - Déboguer un plantage quand il n'y a plus que du code machine.
+   - Optimiser une routine critique.
+   - Sécurité informatique : analyse de programmes, exploitation de failles.
+
+0.3 Architecture, assembleur et syntaxe choisis
+-----------------------------------------------
+   Architecture : x86-64 (aussi appelée AMD64 ou x64), celle des PC actuels.
+   Assembleur   : NASM (Netwide Assembler), le plus utilisé pour apprendre et
+                  pour écrire des noyaux et des chargeurs de démarrage.
+   Système      : Linux (chapitres 1 à 16), puis sans système (chapitre 17).
+
+Il existe deux SYNTAXES pour l'assembleur x86. Ce cours utilise la syntaxe
+Intel (celle de NASM). Tu croiseras l'autre, AT&T (utilisée par GAS, le
+"as" de GNU, et par défaut par objdump et gdb) :
+
+   Intel (NASM)                 AT&T (GAS)
+   ---------------------------  ---------------------------
+   mov eax, 42                  movl $42, %eax
+   mov rax, rbx                 movq %rbx, %rax
+   mov rax, [rbx + 8]           movq 8(%rbx), %rax
+   destination d'abord          source d'abord, % devant les registres,
+                                $ devant les constantes
+
+0.4 Installation sous Arch Linux
+--------------------------------
+   sudo pacman -S nasm             l'assembleur
+   sudo pacman -S base-devel       ld, objdump, gcc (pour le chapitre 14)
+   sudo pacman -S gdb              le débogueur
+   sudo pacman -S strace           affiche les appels système d'un programme
+   sudo pacman -S qemu-system-x86  la machine virtuelle du chapitre 17
+
+Vérifier : nasm -v
+
+0.5 De la source à l'exécutable
+-------------------------------
+   prog.asm  --(nasm)-->  prog.o  --(ld)-->  prog
+
+   nasm -f elf64 -g -F dwarf prog.asm -o prog.o
+   ld prog.o -o prog
+   ./prog
+   echo $?
+
+   -f elf64    format de sortie : fichier objet ELF 64 bits (celui de Linux)
+   -g -F dwarf ajoute les informations de débogage pour gdb
+   ld          l'éditeur de liens : transforme le .o en exécutable
+   echo $?     affiche le code de sortie du dernier programme lancé
+
+Pour ne pas retaper ces commandes, crée un petit script "asm" :
+
+   #!/bin/sh
+   # usage : ./asm prog   (sans le .asm)
+   nasm -f elf64 -g -F dwarf "$1.asm" -o "$1.o" && ld "$1.o" -o "$1"
+
+   chmod +x asm
+
+0.6 Comment voir un résultat sans printf ?
+------------------------------------------
+Au début, on n'a aucune fonction pour afficher un nombre. Deux astuces :
+   1. Le CODE DE SORTIE du programme : on termine le programme avec une
+      valeur, et "echo $?" l'affiche. Limité à 0..255 (seul l'octet de poids
+      faible est gardé), mais parfait pour les premiers chapitres.
+   2. Le DÉBOGUEUR (chapitre 16), qui montre tous les registres.
+Au chapitre 11, on écrira nos propres fonctions d'affichage.
+
+
+================================================================================
+ 1. LE PREMIER PROGRAMME
+================================================================================
+
+1.1 Le code
+-----------
+   ; ===== fichier bonjour.asm =====
+   ; Affiche un message puis quitte, sans aucune bibliothèque.
+
+   bits 64                     ; on écrit du code 64 bits
+   default rel                 ; adresses relatives à rip (voir 6.5)
+
+   section .data               ; section des données initialisées
+   message:    db "Bonjour tout le monde !", 10   ; 10 = retour à la ligne
+   longueur:   equ $ - message                   ; calculé par NASM
+
+   section .text               ; section du code
+   global _start               ; rend _start visible pour ld
+
+   _start:                     ; le point d'entrée du programme
+       mov rax, 1              ; numéro de l'appel système "write"
+       mov rdi, 1              ; 1er argument : 1 = sortie standard (écran)
+       lea rsi, [message]      ; 2e argument : adresse du texte
+       mov rdx, longueur       ; 3e argument : nombre d'octets à écrire
+       syscall                 ; demande au noyau Linux d'écrire
+
+       mov rax, 60             ; numéro de l'appel système "exit"
+       mov rdi, 0              ; code de sortie : 0
+       syscall                 ; le programme se termine ici
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de bonjour.asm =====
+
+   nasm -f elf64 bonjour.asm -o bonjour.o
+   ld bonjour.o -o bonjour
+   ./bonjour
+
+1.2 Explication ligne par ligne
+-------------------------------
+Une ligne d'assembleur NASM a au plus quatre parties, toutes facultatives :
+
+   etiquette:   instruction   operandes      ; commentaire
+   _start:      mov           rax, 60        ; appel exit
+
+- COMMENTAIRE : tout ce qui suit un point-virgule. Commente beaucoup :
+  l'assembleur est illisible sans commentaires.
+
+- ÉTIQUETTE (label) : un nom qui représente une ADRESSE, celle de l'endroit
+  où elle est placée. message est l'adresse du premier octet du texte, _start
+  l'adresse de la première instruction.
+
+- bits 64 : indique à NASM de produire du code 64 bits. C'est déjà le cas
+  avec -f elf64, mais c'est une bonne habitude (au chapitre 17 on écrira du
+  16, du 32 et du 64 bits dans le même fichier).
+
+- section : découpe le programme en zones (code, données...). Chapitre 4.
+
+- db "..." : "define byte", place ces octets en mémoire. Chapitre 4.
+
+- equ $ - message : $ est l'adresse de la position actuelle. $ - message
+  donne donc le nombre d'octets depuis message : la longueur du texte.
+
+- global _start : ld cherche un symbole _start pour savoir où commence le
+  programme. global le rend visible hors du fichier.
+
+- mov rax, 1 : copie la valeur 1 dans le registre rax (chapitre 3).
+
+- syscall : passe la main au noyau Linux, qui regarde rax pour savoir quel
+  service est demandé, et rdi, rsi, rdx... pour les arguments. Chapitre 11.
+
+- La dernière section .note.GNU-stack indique que la pile ne doit pas être
+  exécutable. Sans elle, ld affiche un avertissement. Tu peux la considérer
+  comme une formule rituelle à mettre à la fin de chaque fichier.
+
+1.3 Et si on oublie exit ?
+--------------------------
+Supprime les trois dernières instructions et relance : "Segmentation fault".
+Le processeur ne sait pas où s'arrête ton programme. Après le dernier
+syscall, il continue à exécuter les octets suivants en mémoire, qui ne sont
+pas du code valide, jusqu'au plantage. En assembleur, RIEN ne se fait tout
+seul : même la fin du programme doit être écrite.
+
+1.4 Le code machine produit
+---------------------------
+   objdump -d -M intel bonjour.o
+
+montre chaque instruction avec ses octets. Tu verras par exemple que
+"mov rax, 60" devient B8 3C 00 00 00 : NASM a choisi tout seul une version
+plus courte équivalente (mov eax, 60, voir 3.4).
+
+
+EXERCICES DU CHAPITRE 1
+-----------------------
+1.1  Modifie le message pour afficher ton prénom.
+1.2  Fais quitter le programme avec le code 42 et vérifie avec echo $?.
+1.3  Affiche deux messages différents avec deux appels à write.
+
+
+================================================================================
+ 2. LES NOMBRES COMME LES VOIT LE PROCESSEUR
+================================================================================
+
+2.1 Binaire et hexadécimal
+--------------------------
+Le processeur ne manipule que des BITS (0 ou 1). Huit bits forment un OCTET.
+
+Le BINAIRE (base 2) : chaque position vaut une puissance de 2.
+   0b1011 = 1x8 + 0x4 + 1x2 + 1x1 = 11
+
+L'HEXADÉCIMAL (base 16) utilise 0-9 puis A=10, B=11, C=12, D=13, E=14,
+F=15. Son intérêt : UN chiffre hexa = QUATRE bits exactement. Un octet
+s'écrit donc toujours avec deux chiffres hexa.
+
+   Binaire   Hexa   Décimal        Binaire   Hexa   Décimal
+   0000      0      0              1000      8      8
+   0001      1      1              1001      9      9
+   0010      2      2              1010      A      10
+   0011      3      3              1011      B      11
+   0100      4      4              1100      C      12
+   0101      5      5              1101      D      13
+   0110      6      6              1110      E      14
+   0111      7      7              1111      F      15
+
+   0b1101_0110 = 0xD6 = 214     (1101 = D, 0110 = 6)
+
+Écrire des nombres en NASM :
+   42          décimal
+   0x2A        hexadécimal (aussi : 2Ah, 0h2A)
+   0b101010    binaire (aussi : 101010b). Le _ est permis : 0b0010_1010
+   0o52        octal (aussi : 52q)
+   'A'         la valeur du caractère A (65)
+
+2.2 Les tailles
+---------------
+   Nom NASM   Bits   Octets   Plage non signée      Plage signée
+   --------   ----   ------   -------------------   ---------------------
+   byte        8      1       0 à 255               -128 à 127
+   word       16      2       0 à 65 535            -32 768 à 32 767
+   dword      32      4       0 à 4 294 967 295     -2 147 483 648 à ...
+   qword      64      8       0 à 1,8 x 10^19       -9,2 x 10^18 à ...
+
+Pourquoi un "word" fait-il 16 bits sur un processeur 64 bits ? Par
+compatibilité avec le 8086 de 1978, dont le mot faisait 16 bits. Les noms sont
+restés : double word = 32 bits, quad word = 64 bits.
+
+2.3 Les nombres négatifs : le complément à deux
+-----------------------------------------------
+Pour obtenir -x : on inverse tous les bits de x, puis on ajoute 1.
+
+   5   = 0b0000_0101
+   ~5  = 0b1111_1010   (inversion)
+   -5  = 0b1111_1011   (+1)       = 0xFB
+
+   -1  = 0xFF sur 8 bits, 0xFFFF sur 16 bits, 0xFFFFFFFFFFFFFFFF sur 64 bits
+
+Propriétés :
+   - Le bit de poids fort (le plus à gauche) vaut 1 pour un négatif : c'est
+     le BIT DE SIGNE.
+   - L'addition marche pareil pour signés et non signés : 5 + (-5) =
+     0b0000_0101 + 0b1111_1011 = 1_0000_0000, le 9e bit sort, reste 0.
+
+2.4 LE point clé : le processeur ne connaît pas les types
+---------------------------------------------------------
+L'octet 0xFF vaut 255 si on le lit comme non signé, et -1 si on le lit comme
+signé. Le processeur ne le sait pas et ne s'en soucie pas : il additionne des
+bits. C'est TOI qui choisis l'interprétation, en choisissant les bonnes
+instructions (par exemple ja ou jg pour comparer, chapitre 8 ; mul ou imul,
+chapitre 5). La même chose vaut pour les adresses, les caractères et le code
+lui-même : en mémoire, tout n'est qu'octets.
+
+2.5 L'ordre des octets : little-endian
+--------------------------------------
+Quand une valeur fait plusieurs octets, x86 range en mémoire l'octet de POIDS
+FAIBLE EN PREMIER (à l'adresse la plus basse). On dit "petit-boutiste" ou
+little-endian.
+
+   dd 0x12345678    donne en mémoire :   78 56 34 12
+                                         ^ adresse la plus basse
+
+C'est pour ça que lire le premier octet d'un dword donne l'octet de poids
+faible : mov al, [x] lit 0x78. Pratique : un même emplacement se lit
+correctement sur 8, 16, 32 ou 64 bits pour une petite valeur positive.
+
+2.6 Les caractères
+------------------
+Un caractère est un nombre. En ASCII : 'A' = 65 = 0x41, 'a' = 97 = 0x61,
+'0' = 48 = 0x30, espace = 32, retour à la ligne = 10, retour chariot = 13.
+   - Minuscule -> majuscule : soustraire 32 (ou mettre le bit 5 à 0).
+   - Chiffre -> valeur : soustraire '0'.
+Les lettres accentuées ne sont pas en ASCII. Sous Linux, le texte est en
+UTF-8, où "é" occupe DEUX octets (0xC3 0xA9) : attention quand tu comptes
+les caractères.
+
+
+EXERCICES DU CHAPITRE 2
+-----------------------
+2.1  Convertis 200 en binaire et en hexa, puis 0xBEEF en décimal.
+2.2  Écris -42 en complément à deux sur 8 bits et sur 16 bits, en hexa.
+2.3  Quels octets trouve-t-on en mémoire, dans l'ordre, pour dw 0xABCD et
+     pour dq 1 ?
+
+
+================================================================================
+ 3. LE PROCESSEUR ET SES REGISTRES
+================================================================================
+
+3.1 Le fonctionnement du processeur
+-----------------------------------
+Le processeur répète sans fin la même boucle :
+   1. lire l'instruction à l'adresse contenue dans le registre RIP ;
+   2. avancer RIP à l'instruction suivante ;
+   3. exécuter l'instruction (qui peut modifier RIP : c'est un saut).
+
+La mémoire (RAM) est grande mais lente. Le processeur possède des REGISTRES :
+quelques cases de 64 bits, internes, très rapides. Presque tous les calculs
+se font dans les registres.
+
+3.2 Les 16 registres généraux
+-----------------------------
+   Registre  Nom historique / usage habituel
+   --------  ---------------------------------------------------------------
+   rax       Accumulateur. Valeur de retour des fonctions, numéro de syscall.
+   rbx       Base. Registre libre, préservé par les fonctions (chapitre 10).
+   rcx       Compteur. 4e argument des fonctions, compteur de rep et loop.
+   rdx       Données. 3e argument, partie haute de mul et div.
+   rsi       Source Index. 2e argument, source des instructions de chaînes.
+   rdi       Destination Index. 1er argument, destination des chaînes.
+   rbp       Base Pointer. Base du cadre de pile (chapitre 9), ou libre.
+   rsp       Stack Pointer. Sommet de la pile. NE PAS utiliser pour autre
+             chose !
+   r8 à r15  Registres ajoutés par le 64 bits. r8 et r9 : 5e et 6e arguments.
+
+Ces rôles sont des conventions, pas des obligations (sauf rsp et quelques
+instructions qui utilisent un registre précis).
+
+3.3 Les sous-registres
+----------------------
+On peut accéder à une partie d'un registre :
+
+   64 bits   32 bits   16 bits   8 bits bas   8 bits haut (anciens)
+   -------   -------   -------   ----------   ---------------------
+   rax       eax       ax        al           ah
+   rbx       ebx       bx        bl           bh
+   rcx       ecx       cx        cl           ch
+   rdx       edx       dx        dl           dh
+   rsi       esi       si        sil
+   rdi       edi       di        dil
+   rbp       ebp       bp        bpl
+   rsp       esp       sp        spl
+   r8        r8d       r8w       r8b
+   ...       ...       ...       ...
+   r15       r15d      r15w      r15b
+
+Schéma pour rax :
+
+   |<------------------------- rax (64 bits) ------------------------->|
+                                    |<---------- eax (32 bits) ------->|
+                                                     |<-- ax (16) ---->|
+                                                     |<- ah ->|<- al ->|
+
+   mov rax, 0x1122334455667788
+   ; eax = 0x55667788, ax = 0x7788, ah = 0x77, al = 0x88
+
+Restriction : ah, bh, ch, dh ne peuvent pas être utilisés dans la même
+instruction que sil, dil, bpl, spl ou r8b à r15b (NASM refuse).
+
+3.4 LA RÈGLE PIÈGE des registres 32 bits
+----------------------------------------
+   - Écrire dans un registre 32 bits (eax...) met à ZÉRO les 32 bits hauts
+     du registre 64 bits.
+   - Écrire dans un registre 8 ou 16 bits (al, ax...) ne touche PAS au reste.
+
+   mov rax, 0xFFFFFFFFFFFFFFFF
+   mov eax, 1          ; rax = 0x0000000000000001  (haut remis à zéro)
+
+   mov rax, 0xFFFFFFFFFFFFFFFF
+   mov ax, 1           ; rax = 0xFFFFFFFFFFFF0001  (haut conservé)
+
+Conséquences pratiques :
+   - "mov eax, 60" est équivalent à "mov rax, 60" mais plus court : NASM et
+     les compilateurs l'utilisent partout.
+   - "xor eax, eax" est la façon standard de mettre rax à zéro (2 octets).
+
+3.5 Le registre des drapeaux RFLAGS
+-----------------------------------
+Après la plupart des calculs, le processeur met à jour des bits (drapeaux,
+"flags") qui décrivent le résultat. Les sauts conditionnels (chapitre 8) les
+lisent.
+
+   Drapeau  Bit  Nom              Mis à 1 quand...
+   -------  ---  ---------------  ------------------------------------------
+   CF        0   Carry            le résultat NON SIGNÉ déborde (retenue ou
+                                  emprunt)
+   PF        2   Parity           l'octet bas du résultat a un nombre pair
+                                  de bits à 1 (rarement utile)
+   ZF        6   Zero             le résultat vaut zéro
+   SF        7   Sign             le bit de poids fort du résultat vaut 1
+                                  (négatif si on lit en signé)
+   OF       11   Overflow         le résultat SIGNÉ déborde
+   DF       10   Direction        sens des instructions de chaînes (ch. 12)
+   IF        9   Interrupt        interruptions autorisées (chapitre 17)
+
+Exemples sur 8 bits :
+   mov al, 255
+   add al, 1       ; al = 0     CF = 1 (255 + 1 déborde en non signé)
+                   ;            ZF = 1 (résultat nul)
+   mov al, 127
+   add al, 1       ; al = 128   OF = 1 (127 + 1 déborde en signé : -128)
+                   ;            SF = 1, CF = 0
+   mov al, 5
+   sub al, 7       ; al = 254   CF = 1 (emprunt), SF = 1 (-2 en signé)
+
+Toutes les instructions ne modifient pas tous les drapeaux : mov, lea, push,
+pop, call, jmp ne les touchent PAS. inc et dec ne modifient pas CF. La
+documentation d'Intel indique l'effet de chaque instruction.
+
+3.6 Les autres registres
+------------------------
+   rip           adresse de la prochaine instruction. On ne l'écrit pas
+                 directement : jmp, call et ret le modifient.
+   cs ds es ss   registres de SEGMENT. Presque inutiles en 64 bits sous
+   fs gs         Linux (fs sert au stockage par thread), mais essentiels en
+                 mode réel et en mode protégé (chapitre 17).
+   cr0 cr2 cr3   registres de CONTRÔLE : mode protégé, pagination...
+   cr4           Réservés au noyau (chapitre 17).
+   xmm0 à xmm15  registres 128 bits pour les flottants et le SIMD (ch. 15).
+   MSR           registres spécifiques au modèle, lus avec rdmsr (ch. 17).
+
+
+EXERCICES DU CHAPITRE 3
+-----------------------
+3.1  Après mov rax, 0x1122334455667788 puis mov al, 0xFF, que vaut rax ?
+     Et après mov eax, 0xFF à la place ?
+3.2  Donne CF, ZF, SF et OF après : mov al, 0x80 puis sub al, 1.
+3.3  Écris un programme qui quitte avec, comme code de sortie, l'octet ah de
+     la valeur 0x1234. Vérifie avec echo $?.
+
+
+================================================================================
+ 4. SECTIONS, DONNÉES ET ÉTIQUETTES
+================================================================================
+
+4.1 Les sections
+----------------
+   section .text     le CODE. En lecture seule et exécutable.
+   section .data     les données INITIALISÉES, modifiables.
+   section .rodata   les données initialisées en LECTURE SEULE (constantes,
+                     textes). Y écrire provoque un Segmentation fault.
+   section .bss      les données NON INITIALISÉES. Ne prennent pas de place
+                     dans le fichier : Linux les remplit de zéros au démarrage.
+
+Correspondance avec le C :
+   int x = 5;              ->  .data
+   const char *t = "abc";  ->  le texte dans .rodata
+   int tampon[1000];       ->  .bss (variable globale sans initialisation)
+   variables locales       ->  la pile (chapitre 9)
+
+On peut ouvrir la même section plusieurs fois dans un fichier : NASM
+rassemble les morceaux.
+
+4.2 Réserver des données initialisées : db, dw, dd, dq
+-------------------------------------------------------
+   octet:      db 0x41                 ; 1 octet
+   mot:        dw 1000                 ; 2 octets
+   double:     dd 100000               ; 4 octets
+   quad:       dq 1234567890123        ; 8 octets
+   plusieurs:  dd 1, 2, 3, 4           ; 4 dword à la suite (16 octets)
+   texte:      db "Salut", 10, 0       ; les caractères, puis 10, puis 0
+   melange:    db 'A', "BC", 0x44      ; 'A' 'B' 'C' 'D'
+   flottant:   dq 3.14                 ; double IEEE 754 (8 octets)
+
+Une chaîne entre guillemets "..." ou apostrophes '...' est prise telle
+quelle. Entre accents graves `...`, NASM comprend les séquences
+d'échappement comme en C :
+   db `Ligne 1\nLigne 2\n\0`
+
+ATTENTION : NASM n'ajoute AUCUN zéro final. Si tu veux une chaîne terminée
+par 0 (comme en C), écris le 0 toi-même.
+
+4.3 Réserver sans initialiser : resb, resw, resd, resq
+------------------------------------------------------
+Dans .bss :
+   section .bss
+   tampon:     resb 256        ; 256 octets
+   compteurs:  resd 10         ; 10 dword = 40 octets
+   pointeur:   resq 1          ; 8 octets
+
+4.4 Répéter : times
+-------------------
+   zeros:      times 100 db 0          ; 100 octets à 0
+   motif:      times 4 db 0xAB, 0xCD   ; AB CD AB CD AB CD AB CD
+               times 510 - ($ - $$) db 0   ; remplir jusqu'à 510 octets (ch. 17)
+
+4.5 Les constantes : equ, $ et $$
+---------------------------------
+   TAILLE      equ 64                  ; une constante, ne prend aucune place
+   ECRAN_LARG  equ 80
+
+   message:    db "Bonjour", 10
+   LONGUEUR    equ $ - message         ; 8
+
+   $   = adresse de la ligne en cours
+   $$  = adresse du début de la section en cours
+   $ - $$ = nombre d'octets depuis le début de la section
+
+4.6 Les étiquettes
+------------------
+Une étiquette est un NOM pour une ADRESSE. Rien de plus. NASM ne retient ni
+le type ni la taille de ce qui est rangé là.
+
+Étiquettes LOCALES : un nom qui commence par un point est rattaché à la
+dernière étiquette normale. On peut réutiliser .boucle dans chaque fonction.
+
+   fonction_a:
+   .boucle:            ; vrai nom : fonction_a.boucle
+       jmp .boucle
+   fonction_b:
+   .boucle:            ; vrai nom : fonction_b.boucle, pas de conflit
+       jmp .boucle
+
+4.7 Alignement : align et alignb
+--------------------------------
+   section .data
+               db 1
+               align 8             ; bouche le trou jusqu'à un multiple de 8
+   valeur:     dq 42
+
+   section .bss
+               alignb 16           ; même chose dans .bss
+   tampon_simd: resb 64
+
+4.8 Inclure un fichier binaire : incbin
+---------------------------------------
+   police:     incbin "police.bin"     ; copie les octets du fichier ici
+
+
+EXERCICES DU CHAPITRE 4
+-----------------------
+4.1  Déclare en .rodata un tableau de 5 dword valant 10, 20, 30, 40, 50 et
+     une constante NB égale à son nombre d'éléments, calculée avec $.
+4.2  Déclare en .bss un tampon de 1024 octets et un tableau de 16 qword.
+4.3  Combien d'octets occupent : db "abc", 0 / dw 1, 2, 3 / times 3 dd 0 ?
+
+
+================================================================================
+ 5. LES INSTRUCTIONS DE BASE : MOV ET L'ARITHMÉTIQUE
+================================================================================
+
+5.1 mov : copier une valeur
+---------------------------
+   mov destination, source          ; destination = source
+
+Formes possibles :
+   mov rax, rbx              ; registre <- registre
+   mov rax, 42               ; registre <- constante
+   mov rax, [valeur]         ; registre <- contenu de la mémoire
+   mov [valeur], rax         ; mémoire  <- registre
+   mov qword [valeur], 42    ; mémoire  <- constante (taille obligatoire)
+
+Règles :
+   - Destination et source ont la MÊME TAILLE : mov eax, bl est refusé.
+   - Pas de mémoire vers mémoire : mov [a], [b] est impossible. On passe par
+     un registre : mov rax, [b] puis mov [a], rax.
+   - Une constante copiée dans une case 64 bits est limitée à 32 bits signés
+     (étendus). Avec mov qword [x], 0x1_0000_0000, NASM affiche seulement un
+     avertissement ("signed dword immediate exceeds bounds") et TRONQUE la
+     valeur : bug assuré. Passe par un registre : mov rax, 0x100000000 puis
+     mov [x], rax. (Seul mov vers un registre 64 bits accepte 64 bits.)
+   - mov ne modifie aucun drapeau.
+   - Le mot "copie" est important : la source ne change pas.
+
+5.2 Changer de taille : movzx, movsx, movsxd
+--------------------------------------------
+Pour copier une petite valeur dans un grand registre, il faut dire comment
+remplir les bits hauts :
+
+   movzx eax, bl       ; extension par des ZÉROS (valeurs non signées)
+   movsx eax, bl       ; extension du SIGNE (valeurs signées)
+   movsxd rax, ebx     ; extension du signe de 32 vers 64 bits
+
+   mov bl, 0xFE        ; 254 en non signé, -2 en signé
+   movzx eax, bl       ; eax = 0x000000FE = 254
+   movsx eax, bl       ; eax = 0xFFFFFFFE = -2
+
+Pas de "movzx rax, ebx" : mov eax, ebx fait déjà l'extension par des zéros
+(règle du 3.4).
+
+5.3 xchg : échanger
+-------------------
+   xchg rax, rbx       ; échange les deux valeurs
+
+5.4 Addition et soustraction
+----------------------------
+   add rax, rbx        ; rax = rax + rbx
+   sub rax, 10         ; rax = rax - 10
+   inc rcx             ; rcx = rcx + 1   (ne modifie pas CF)
+   dec rcx             ; rcx = rcx - 1   (ne modifie pas CF)
+   neg rax             ; rax = -rax
+   add qword [total], 5    ; fonctionne aussi sur la mémoire
+
+Toutes modifient les drapeaux (CF, ZF, SF, OF...).
+
+Addition sur plus de 64 bits avec adc ("add with carry") :
+   ; (rdx:rax) = (rdx:rax) + (rcx:rbx), nombres de 128 bits
+   add rax, rbx        ; additionne les parties basses, CF = retenue
+   adc rdx, rcx        ; additionne les parties hautes + la retenue
+sbb fait de même pour la soustraction.
+
+5.5 Multiplication : mul et imul
+--------------------------------
+mul (non signé) a UN seul opérande et utilise rax implicitement :
+
+   mul rbx             ; rdx:rax = rax * rbx
+                       ; (résultat sur 128 bits : haut dans rdx, bas dans rax)
+
+   Taille de l'opérande   Multiplié par   Résultat dans
+   8 bits  (bl)           al              ax
+   16 bits (bx)           ax              dx:ax
+   32 bits (ebx)          eax             edx:eax
+   64 bits (rbx)          rax             rdx:rax
+
+ATTENTION : mul ÉCRASE rdx, même si le résultat tient dans rax. Oublier ça
+est une source de bugs classique.
+
+imul (signé) a trois formes, les deux dernières sont les plus pratiques :
+   imul rbx            ; rdx:rax = rax * rbx (comme mul, mais signé)
+   imul rax, rbx       ; rax = rax * rbx (64 bits bas seulement)
+   imul rax, rbx, 10   ; rax = rbx * 10
+
+Astuce : pour les 64 bits bas du résultat, imul rax, rbx donne le bon
+résultat que les nombres soient signés ou non. Les compilateurs l'utilisent
+presque toujours à la place de mul.
+
+5.6 Division : div et idiv
+--------------------------
+div (non signé) divise le nombre de 128 bits rdx:rax :
+   div rbx             ; rax = quotient de rdx:rax / rbx
+                       ; rdx = reste
+
+Il faut donc PRÉPARER rdx avant la division :
+   ; non signé : rdx = 0
+   mov rax, 17
+   xor edx, edx        ; INDISPENSABLE
+   mov rbx, 5
+   div rbx             ; rax = 3, rdx = 2
+
+   ; signé : rdx = extension du signe de rax, avec cqo
+   mov rax, -17
+   cqo                 ; rdx = 0xFFFF...FFFF (car rax est négatif)
+   mov rbx, 5
+   idiv rbx            ; rax = -3, rdx = -2
+
+   cqo  : rax -> rdx:rax (64 bits)       cdq  : eax -> edx:eax (32 bits)
+
+Si le diviseur vaut 0, OU si le quotient ne tient pas dans rax (ce qui arrive
+quand on oublie de mettre rdx à zéro !), le processeur déclenche une
+exception. Linux tue le programme avec "Floating point exception", même s'il
+n'y a aucun flottant.
+
+Diviser par une puissance de 2 : utilise un décalage (chapitre 7), bien plus
+rapide. shr rax, 3 divise un non signé par 8.
+
+5.7 Exemple complet
+-------------------
+   ; ===== fichier calcul.asm =====
+   ; Calcule (7 * 6 + 12) / 4 et le renvoie comme code de sortie.
+   bits 64
+
+   section .text
+   global _start
+
+   _start:
+       mov rax, 7
+       imul rax, rax, 6        ; rax = 42
+       add rax, 12             ; rax = 54
+       xor edx, edx            ; prépare la division non signée
+       mov rcx, 4
+       div rcx                 ; rax = 13, rdx = 2
+
+       mov rdi, rax            ; code de sortie = 13
+       mov eax, 60             ; exit
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de calcul.asm =====
+
+   ./calcul ; echo $?          -> 13
+
+
+EXERCICES DU CHAPITRE 5
+-----------------------
+5.1  Calcule en assembleur la somme 1 + 2 + ... + 20 avec la formule
+     n * (n + 1) / 2, et renvoie-la comme code de sortie.
+5.2  Convertis 100 degrés Celsius en Fahrenheit (F = C * 9 / 5 + 32) et
+     renvoie le résultat comme code de sortie. Pourquoi 212 s'affiche bien
+     alors que 1000 °C (1832 °F) ne s'afficherait pas correctement ?
+5.3  Échange les valeurs de deux variables .data a et b de type qword.
+
+
+================================================================================
+ 6. LES ADRESSES ET L'ACCÈS À LA MÉMOIRE
+================================================================================
+
+C'est l'équivalent du chapitre sur les pointeurs en C, et c'est aussi le
+chapitre qui explique les pointeurs du C : en assembleur, on voit exactement
+ce qu'ils sont. Il n'y a pas de "pointeur" en assembleur : il y a des
+ADRESSES, qui sont de simples nombres de 64 bits, et une notation pour aller
+lire ou écrire à une adresse : les CROCHETS.
+
+
+6.1 La mémoire est un tableau d'octets
+--------------------------------------
+Pour le programme, la mémoire est un immense tableau d'octets, numérotés de
+0 à 2^64 - 1 (en pratique, seules certaines zones sont utilisables). Le
+numéro d'un octet est son ADRESSE.
+
+   section .data
+   nombre:  dq 1000
+   lettre:  db 'Z'
+
+   Adresse    Contenu (octets)            Étiquette
+   0x402000   E8 03 00 00 00 00 00 00     nombre   (1000 = 0x3E8, little-endian)
+   0x402008   5A                          lettre   ('Z' = 0x5A)
+
+(Adresses simplifiées pour l'exemple.)
+
+Une étiquette EST une adresse. Pour NASM, "nombre" vaut 0x402000, c'est tout.
+
+
+6.2 Les crochets : adresse ou contenu
+-------------------------------------
+C'est LA règle à comprendre :
+
+   nombre      l'ADRESSE (0x402000)
+   [nombre]    le CONTENU de la mémoire à cette adresse (1000)
+
+   lea rax, [nombre]    ; rax = 0x402000   (l'adresse, voir 6.6)
+   mov rax, [nombre]    ; rax = 1000       (la valeur rangée à cette adresse)
+   mov [nombre], rbx    ; écrit rbx à l'adresse 0x402000
+
+Les crochets fonctionnent aussi avec un REGISTRE qui contient une adresse.
+C'est exactement un pointeur :
+
+   lea rbx, [nombre]    ; rbx contient l'adresse de nombre   (rbx = &nombre)
+   mov rax, [rbx]       ; rax = valeur à l'adresse rbx       (rax = *rbx)
+   mov qword [rbx], 7   ; écrit 7 à l'adresse rbx            (*rbx = 7)
+   add rbx, 8           ; rbx pointe 8 octets plus loin      (rbx++ en C
+                        ;                                     pour un int64_t*)
+
+Correspondance avec le C :
+   C                        Assembleur
+   ----------------------   ----------------------------------------
+   x                        [x]
+   &x                       x   (ou lea reg, [x])
+   p = &x                   lea rbx, [x]
+   *p                       [rbx]
+   *p = 7                   mov qword [rbx], 7
+   p[i]  (int64_t *p)       [rbx + rcx*8]
+   p++   (int64_t *p)       add rbx, 8
+   p->champ                 [rbx + DECALAGE_DU_CHAMP]
+
+Dans la mémoire, un pointeur C n'est qu'un qword qui contient une adresse.
+Le "type pointé" n'existe que dans la tête du compilateur : il sert à choisir
+la taille lue (le "qword" ci-dessus) et le multiplicateur (le "*8").
+
+
+6.3 Préciser la taille lue ou écrite
+------------------------------------
+Quand NASM ne peut pas deviner la taille, il faut la donner :
+
+   mov [rbx], 1            ; ERREUR : "operation size not specified"
+                           ; 1 octet ? 2 ? 4 ? 8 ?
+   mov byte  [rbx], 1      ; écrit 1 octet
+   mov word  [rbx], 1      ; écrit 2 octets
+   mov dword [rbx], 1      ; écrit 4 octets
+   mov qword [rbx], 1      ; écrit 8 octets
+
+Avec un registre, la taille est celle du registre : pas besoin de la dire.
+   mov al, [rbx]           ; lit 1 octet
+   mov eax, [rbx]          ; lit 4 octets
+   mov rax, [rbx]          ; lit 8 octets
+
+PIÈGE : NASM ne vérifie pas que ça correspond à ce que tu as déclaré.
+   petit:  db 5
+           mov rax, [petit]    ; lit 8 octets : le 5 ET les 7 octets suivants !
+Pour lire un octet dans un registre 64 bits : movzx eax, byte [petit]
+
+
+6.4 Les modes d'adressage
+-------------------------
+Entre crochets, x86-64 accepte une expression de la forme :
+
+   [ base + index * échelle + déplacement ]
+
+   base          un registre (facultatif)
+   index         un registre, sauf rsp (facultatif)
+   échelle       1, 2, 4 ou 8 uniquement
+   déplacement   une constante (ou une étiquette)
+
+Exemples :
+   [rbx]                   adresse = rbx
+   [rbx + 16]              adresse = rbx + 16          (champ de structure)
+   [rbx - 8]               adresse = rbx - 8           (variable locale)
+   [rbx + rcx]             adresse = rbx + rcx         (tableau d'octets)
+   [rbx + rcx*4]           adresse = rbx + rcx * 4     (tableau de dword)
+   [rbx + rcx*8 + 16]      adresse = rbx + rcx*8 + 16
+   [tableau + rcx*8]       adresse = tableau + rcx*8   (voir remarque 6.5)
+
+L'échelle correspond à la TAILLE D'UN ÉLÉMENT. C'est l'arithmétique des
+pointeurs du C, faite à la main :
+   C : t[i] avec int32_t *t      asm : [rbx + rcx*4]
+   C : t[i] avec int64_t *t      asm : [rbx + rcx*8]
+   C : t[i] avec char *t         asm : [rbx + rcx]
+
+Interdit :
+   [rbx*rcx]          "unable to multiply two non-scalar objects"
+   [rbx+rcx+rdx]      "invalid effective address: too many registers"
+                      (au plus un registre base et un registre index)
+   [rbx+rcx*16]       "invalid 64-bit effective address" (échelle interdite)
+Petite exception pratique : NASM accepte [rax*3], [rax*5] et [rax*9], qu'il
+réécrit en [rax + rax*2], [rax + rax*4] et [rax + rax*8]. Mais [rax*6] est
+refusé.
+
+
+6.5 Les adresses relatives à RIP : default rel
+----------------------------------------------
+En 64 bits, une instruction peut désigner une adresse "à tant d'octets de
+l'instruction actuelle" plutôt qu'une adresse absolue. C'est l'adressage
+RELATIF À RIP :
+
+   mov rax, [rel nombre]   ; adresse de nombre calculée par rapport à rip
+
+Avantages : instruction plus courte, et programme qui fonctionne à n'importe
+quelle adresse (PIE, "position independent executable"). C'est obligatoire
+pour les programmes liés avec gcc sous Arch Linux (PIE par défaut, ch. 14).
+
+"default rel" en haut du fichier rend rel automatique pour toutes les
+adresses de la forme [etiquette] ou [etiquette + constante]. Mets-le dans
+tous tes programmes 64 bits.
+
+Limite : [tableau + rcx*8] contient un registre, il ne peut pas être relatif
+à rip. NASM produit alors une adresse absolue sur 32 bits, qui fonctionne
+avec ld mais est refusée dans un exécutable PIE. La méthode sûre :
+   lea rbx, [tableau]      ; relatif à rip
+   mov rax, [rbx + rcx*8]
+
+
+6.6 lea : calculer une adresse sans lire la mémoire
+---------------------------------------------------
+lea ("load effective address") calcule l'adresse entre crochets et la range
+dans le registre, SANS aller lire la mémoire. C'est l'opérateur & du C.
+
+   lea rbx, [nombre]           ; rbx = adresse de nombre
+   lea rsi, [rbx + rcx*8]      ; rsi = adresse de l'élément rcx (&t[i])
+   lea rdi, [rbp - 16]         ; rdi = adresse d'une variable locale
+
+   mov rax, [rbx + 8]          ; rax = CONTENU à l'adresse rbx + 8
+   lea rax, [rbx + 8]          ; rax = rbx + 8, rien n'est lu
+
+Astuce très utilisée : lea sert aussi de calculatrice, car il sait faire
+base + index*échelle + constante en une instruction, sans toucher aux
+drapeaux :
+   lea rax, [rdi + rsi]        ; rax = rdi + rsi
+   lea rax, [rdi*4 + rdi]      ; rax = rdi * 5
+   lea rax, [rdi + rdi*2 + 7]  ; rax = rdi * 3 + 7
+
+
+6.7 Parcourir un tableau
+------------------------
+Deux méthodes : avec un INDICE ou avec un POINTEUR qui avance.
+
+   ; ===== fichier tableau.asm =====
+   ; Somme d'un tableau de dword, par indice puis par pointeur.
+   ; Code de sortie : la somme (150).
+   bits 64
+   default rel
+
+   section .rodata
+   tableau:    dd 10, 20, 30, 40, 50
+   NB          equ ($ - tableau) / 4       ; 5 éléments
+
+   section .text
+   global _start
+
+   _start:
+       ; --- Méthode 1 : indice (comme t[i] en C) ---
+       lea rbx, [tableau]      ; rbx = adresse du tableau
+       xor eax, eax            ; eax = somme = 0
+       xor ecx, ecx            ; rcx = i = 0
+   .par_indice:
+       cmp rcx, NB             ; i < NB ?
+       jae .fin_indice         ; sinon on sort (chapitre 8)
+       add eax, [rbx + rcx*4]  ; somme += t[i]   (dword : échelle 4)
+       inc rcx                 ; i++
+       jmp .par_indice
+   .fin_indice:
+       mov r12d, eax           ; on garde le résultat
+
+       ; --- Méthode 2 : pointeur (comme *p++ en C) ---
+       lea rsi, [tableau]              ; p = début
+       lea rdi, [tableau + NB*4]       ; fin = une case après le dernier
+       xor eax, eax
+   .par_pointeur:
+       cmp rsi, rdi            ; p < fin ?
+       jae .fin_pointeur
+       add eax, [rsi]          ; somme += *p
+       add rsi, 4              ; p++  (avance d'UN dword = 4 octets)
+       jmp .par_pointeur
+   .fin_pointeur:
+
+       ; les deux sommes doivent être égales
+       cmp eax, r12d
+       jne .erreur
+       mov edi, eax            ; code de sortie = 150
+       mov eax, 60
+       syscall
+   .erreur:
+       mov edi, 255
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de tableau.asm =====
+
+IMPORTANT : en assembleur, "avancer d'un élément" veut dire ajouter la
+TAILLE de l'élément. En C, p++ sur un int32_t * ajoute 4 automatiquement ;
+ici, add rsi, 1 avancerait d'un seul octet et lirait n'importe quoi.
+
+
+6.8 Les chaînes de caractères
+-----------------------------
+Une chaîne est un tableau d'octets. Convention C : terminée par un octet 0.
+
+   ; longueur d'une chaîne terminée par 0
+   ; entrée : rdi = adresse de la chaîne   sortie : rax = longueur
+   longueur:
+       mov rax, rdi            ; rax = pointeur courant
+   .boucle:
+       cmp byte [rax], 0       ; octet courant nul ?
+       je .fin
+       inc rax                 ; caractère suivant (1 octet)
+       jmp .boucle
+   .fin:
+       sub rax, rdi            ; longueur = fin - début
+       ret
+
+   ; mettre une chaîne en majuscules (sur place)
+   ; entrée : rdi = adresse de la chaîne (modifiable, donc pas en .rodata)
+   majuscules:
+   .boucle:
+       mov al, [rdi]
+       test al, al             ; fin de chaîne ?
+       jz .fin
+       cmp al, 'a'
+       jb .suivant             ; avant 'a' : pas une minuscule
+       cmp al, 'z'
+       ja .suivant             ; après 'z' : pas une minuscule
+       sub al, 32              ; 'a' - 32 = 'A'
+       mov [rdi], al
+   .suivant:
+       inc rdi
+       jmp .boucle
+   .fin:
+       ret
+
+(ret et l'appel de fonctions sont expliqués aux chapitres 9 et 10.)
+
+
+6.9 Des adresses rangées en mémoire : tableaux de pointeurs
+-----------------------------------------------------------
+Une adresse est un nombre de 64 bits : on peut la ranger en mémoire avec dq.
+C'est un tableau de pointeurs, comme const char *jours[] en C.
+
+   section .rodata
+   lundi:      db "lundi", 0
+   mardi:      db "mardi", 0
+   mercredi:   db "mercredi", 0
+
+   section .data
+   jours:      dq lundi, mardi, mercredi      ; 3 ADRESSES de 8 octets
+
+   ; afficher jours[1] :
+   lea rbx, [jours]
+   mov rdi, [rbx + 1*8]    ; rdi = jours[1] = adresse de "mardi"
+   mov al, [rdi]           ; al = 'm'  (on suit le pointeur : jours[1][0])
+
+   jours   --> [ adr lundi ][ adr mardi ][ adr mercredi ]
+                                 |
+                                 +--> 'm' 'a' 'r' 'd' 'i' 0
+
+Les deux étapes sont bien visibles : une première lecture donne une adresse,
+une seconde lecture à cette adresse donne le caractère. En C, jours[1][0]
+cache exactement ces deux lectures.
+
+Le tableau jours est en .data et non en .rodata : dans un exécutable PIE, ces
+adresses doivent être corrigées au chargement, donc écrites.
+
+Un pointeur de pointeur, c'est la même idée en rangeant l'adresse de jours
+ailleurs :
+   lea rax, [jours]        ; rax = adresse du tableau  (char **)
+   mov rax, [rax + 8]      ; rax = jours[1]            (char *)
+   mov al, [rax]           ; al  = jours[1][0]         (char)
+
+Les arguments de la ligne de commande sont rangés ainsi par Linux sur la
+pile au démarrage (voir 11.7) :
+   [rsp]         argc
+   [rsp + 8]     argv[0]  (adresse de la chaîne)
+   [rsp + 16]    argv[1]
+   ...           0 (fin de argv), puis les variables d'environnement
+
+
+6.10 Les structures
+-------------------
+Une structure est un bloc d'octets où chaque champ est à un DÉCALAGE fixe.
+struct personne { int32_t age; int32_t taille; char *nom; } en C devient :
+
+   décalage 0 : age     (4 octets)
+   décalage 4 : taille  (4 octets)
+   décalage 8 : nom     (8 octets, une adresse)
+   taille totale : 16 octets
+
+On peut écrire les décalages à la main avec equ, mais NASM a struc :
+
+   struc personne
+       .age:       resd 1
+       .taille:    resd 1
+       .nom:       resq 1
+   endstruc
+   ; NASM définit : personne.age = 0, personne.taille = 4,
+   ;                personne.nom = 8, personne_size = 16
+
+struc ne réserve PAS de mémoire : il définit des constantes. Pour créer une
+structure initialisée :
+
+   section .data
+   alice:
+       istruc personne
+           at personne.age,    dd 30
+           at personne.taille, dd 165
+           at personne.nom,    dq nom_alice
+       iend
+
+   ; accès (p->age en C) :
+   lea rbx, [alice]                    ; rbx = pointeur vers la structure
+   mov eax, [rbx + personne.age]       ; eax = p->age
+   add dword [rbx + personne.age], 1   ; p->age++
+   mov rdi, [rbx + personne.nom]       ; rdi = p->nom
+
+Tableau de structures : élément i à l'adresse base + i * taille. 16 est une
+échelle interdite, donc on calcule l'adresse d'abord :
+   imul rax, rcx, personne_size        ; rax = i * 16
+   mov edx, [rbx + rax + personne.taille]   ; t[i].taille
+(Comme 16 est une puissance de 2, mov rax, rcx puis shl rax, 4 marche aussi.)
+
+ALIGNEMENT : NASM n'ajoute AUCUN remplissage dans struc. Si tu dois
+correspondre à une structure C, place toi-même les trous : un compilateur C
+aligne un champ qword sur un multiple de 8. Utilise alignb 8 entre les
+champs de la struc, ou ajoute des champs de remplissage (resb 4...).
+
+
+6.11 Une liste chaînée
+----------------------
+   ; ===== fichier liste.asm =====
+   ; Liste chaînée : chaque noeud = valeur (qword) + adresse du suivant.
+   ; Code de sortie : la somme des valeurs (10 + 20 + 30 = 60).
+   bits 64
+   default rel
+
+   struc noeud
+       .valeur:    resq 1
+       .suivant:   resq 1
+   endstruc
+
+   section .data
+   n1: istruc noeud
+           at noeud.valeur,  dq 10
+           at noeud.suivant, dq n2
+       iend
+   n2: istruc noeud
+           at noeud.valeur,  dq 20
+           at noeud.suivant, dq n3
+       iend
+   n3: istruc noeud
+           at noeud.valeur,  dq 30
+           at noeud.suivant, dq 0      ; 0 = pointeur nul : fin de liste
+       iend
+
+   section .text
+   global _start
+
+   _start:
+       lea rbx, [n1]                   ; courant = premier noeud
+       xor eax, eax                    ; somme = 0
+   .boucle:
+       test rbx, rbx                   ; courant == nul ?
+       jz .fin
+       add rax, [rbx + noeud.valeur]   ; somme += courant->valeur
+       mov rbx, [rbx + noeud.suivant]  ; courant = courant->suivant
+       jmp .boucle
+   .fin:
+       mov rdi, rax
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de liste.asm =====
+
+La ligne mov rbx, [rbx + noeud.suivant] est le coeur de toute structure
+chaînée : on remplace le pointeur par le contenu d'un champ qui est lui-même
+une adresse.
+
+
+6.12 Sauter vers une adresse : pointeurs de fonction
+----------------------------------------------------
+Le code aussi est en mémoire. On peut ranger l'adresse d'une fonction dans
+un registre ou dans un tableau, puis l'appeler :
+
+   lea rax, [ma_fonction]
+   call rax                    ; appel indirect (pointeur de fonction)
+
+   section .data
+   operations: dq addition, soustraction, multiplication
+
+   ; appeler operations[rcx] :
+   lea rbx, [operations]
+   call [rbx + rcx*8]          ; lit l'adresse dans le tableau, puis appelle
+
+C'est le principe des tables de sauts (switch, 8.8), des tables d'appels
+système et de la table des vecteurs d'interruption (chapitre 17).
+
+
+6.13 Les erreurs classiques avec la mémoire
+-------------------------------------------
+ 1. Oublier les crochets       mov rax, nombre      rax = ADRESSE, pas valeur
+ 2. Crochets en trop           mov rax, [rbx]       alors que rbx contient
+                                                    une valeur, pas une adresse
+                                                    -> Segmentation fault
+ 3. Taille non précisée        mov [rbx], 1         refusé par NASM
+ 4. Mauvaise taille lue        mov rax, [octet]     lit 8 octets au lieu de 1
+ 5. Oublier l'échelle          [rbx + rcx]          sur un tableau de qword :
+                                                    lit à cheval sur 2 cases
+ 6. Avancer de 1 au lieu de    inc rsi              sur un tableau de dword
+    la taille
+ 7. Écrire dans .rodata        mov byte [texte], 0  Segmentation fault
+ 8. Adresse dans un registre   mov ebx, [ptr]       une adresse fait 64 bits :
+    32 bits                                         elle est tronquée
+ 9. Sortir du tableau          cmp rcx, NB / jbe    <= au lieu de < : lit une
+                                                    case de trop
+10. Déréférencer 0             mov rax, [rbx]       avec rbx = 0 : plantage
+11. Adresse absolue en PIE     mov rax, [t + rcx*8] refusé à l'édition des
+                                                    liens avec gcc (6.5)
+
+
+EXERCICES DU CHAPITRE 6
+-----------------------
+6.1  Déclare un tableau de 6 qword et renvoie comme code de sortie son plus
+     grand élément. Écris une version par indice et une version par pointeur.
+6.2  Compte le nombre de 'e' dans une chaîne terminée par 0 et renvoie-le
+     comme code de sortie.
+6.3  Inverse sur place un tableau de dword (utilise deux pointeurs, un au
+     début, un à la fin). Renvoie le premier élément comme code de sortie.
+6.4  Déclare 3 structures "point" (x et y en dword) dans un tableau et
+     renvoie la somme de tous les y.
+6.5  Déclare en .data un 4e noeud n4 de valeur 40, dont le suivant vaut 0.
+     Sans toucher aux déclarations de n1, n2 et n3, insère-le PAR CODE entre
+     n2 et n3 (en modifiant les champs suivant à l'exécution), puis vérifie
+     que la somme vaut 100.
+
+
+================================================================================
+ 7. LES OPÉRATIONS SUR LES BITS
+================================================================================
+
+7.1 and, or, xor, not
+---------------------
+   and rax, rbx        ; ET bit à bit     : 1 si les deux bits sont à 1
+   or  rax, rbx        ; OU bit à bit     : 1 si au moins un bit est à 1
+   xor rax, rbx        ; OU exclusif      : 1 si les bits sont différents
+   not rax             ; inverse tous les bits (ne modifie aucun drapeau)
+
+and, or et xor mettent CF et OF à 0, et ZF et SF selon le résultat.
+
+Les manipulations indispensables :
+   or  al, 0b0000_0100     ; mettre le bit 2 à 1
+   and al, 0b1111_1011     ; mettre le bit 2 à 0     (ou : and al, ~4)
+   xor al, 0b0000_0100     ; inverser le bit 2
+   and eax, 0xFF           ; ne garder que l'octet bas (masque)
+   xor eax, eax            ; mettre à zéro (idiome standard, 2 octets)
+   and al, 0xDF            ; lettre minuscule -> majuscule (efface le bit 5)
+   or  al, 0x20            ; lettre majuscule -> minuscule
+
+7.2 test : un and qui ne garde pas le résultat
+----------------------------------------------
+test calcule un ET, met à jour les drapeaux, et jette le résultat.
+
+   test rax, rax       ; ZF = 1 si rax vaut 0, SF = 1 si rax est négatif
+   jz .est_zero        ;   (plus court que cmp rax, 0)
+
+   test al, 1          ; ZF = 0 si le bit 0 est à 1 (nombre impair)
+   jnz .impair
+
+   test eax, 1 << 29   ; teste le bit 29 (utilisé avec CPUID, chapitre 17)
+
+7.3 Les décalages : shl, shr, sar
+---------------------------------
+   shl rax, 3          ; décalage à gauche de 3 bits  = multiplier par 8
+   shr rax, 3          ; décalage logique à droite    = diviser par 8
+                       ;   (des 0 entrent à gauche : pour les non signés)
+   sar rax, 3          ; décalage arithmétique à droite
+                       ;   (le bit de signe est recopié : pour les signés)
+   shl rax, cl         ; nombre de bits variable : UNIQUEMENT dans cl
+
+   mov al, 0b1111_0000     ; -16 en signé, 240 en non signé
+   shr al, 2               ; 0b0011_1100 = 60    (240 / 4)
+   mov al, 0b1111_0000
+   sar al, 2               ; 0b1111_1100 = -4    (-16 / 4)
+
+Le dernier bit sorti va dans CF. Le nombre de décalages est pris modulo 64
+(modulo 32 pour les registres de 32 bits ou moins) : shl rax, 65 décale de 1.
+
+Pour décaler plusieurs registres ensemble : shld et shrd.
+
+7.4 Les rotations : rol, ror
+----------------------------
+Comme un décalage, mais le bit qui sort rentre de l'autre côté.
+   mov al, 0b1000_0001
+   rol al, 1               ; 0b0000_0011
+Utilisées en cryptographie et dans les fonctions de hachage.
+
+7.5 Tester et modifier un bit par son numéro : bt, bts, btr, btc
+----------------------------------------------------------------
+   bt  rax, 5          ; CF = bit 5 de rax
+   bts rax, 5          ; CF = bit 5, puis met le bit 5 à 1
+   btr rax, 5          ; CF = bit 5, puis met le bit 5 à 0
+   btc rax, 5          ; CF = bit 5, puis inverse le bit 5
+   jc .bit_etait_a_1
+
+7.6 Chercher et compter des bits
+--------------------------------
+   bsf rax, rbx        ; rax = numéro du premier bit à 1 de rbx (en partant
+                       ;       du bas). Si rbx = 0 : ZF = 1, rax indéfini.
+   bsr rax, rbx        ; numéro du bit à 1 le plus haut
+   popcnt rax, rbx     ; rax = nombre de bits à 1 dans rbx
+   tzcnt rax, rbx      ; comme bsf, mais donne 64 si rbx = 0
+   lzcnt rax, rbx      ; nombre de zéros en tête
+
+popcnt, tzcnt et lzcnt n'existent que sur les processeurs récents (tous
+les PC depuis une dizaine d'années). Sur un vieux processeur : "Illegal
+instruction".
+
+
+EXERCICES DU CHAPITRE 7
+-----------------------
+7.1  Compte le nombre de bits à 1 de 0xF0F0 sans popcnt (boucle avec shr et
+     un test du bit 0) et renvoie-le comme code de sortie (résultat : 8).
+7.2  Sans mul ni imul, calcule rax * 10 avec des décalages et une addition.
+7.3  Vérifie qu'un nombre est une puissance de 2 avec l'astuce
+     x & (x - 1) == 0 (et x != 0).
+
+
+================================================================================
+ 8. SAUTS, CONDITIONS ET BOUCLES
+================================================================================
+
+8.1 jmp : le saut inconditionnel
+--------------------------------
+   jmp etiquette       ; rip = adresse de etiquette
+   jmp rax             ; saut indirect : rip = rax
+   jmp [rbx + rcx*8]   ; saut indirect via un tableau d'adresses
+
+8.2 cmp : comparer
+------------------
+cmp fait une soustraction, met à jour les drapeaux, et jette le résultat.
+   cmp rax, rbx        ; calcule rax - rbx, seulement pour les drapeaux
+
+On l'enchaîne avec un SAUT CONDITIONNEL, qui saute ou non selon les drapeaux.
+
+8.3 Les sauts conditionnels
+---------------------------
+   Condition     Non signés        Signés           Drapeaux testés
+   -----------   ---------------   --------------   -----------------------
+   a == b        je   (jz)         je   (jz)        ZF = 1
+   a != b        jne  (jnz)        jne  (jnz)       ZF = 0
+   a >  b        ja   (jnbe)       jg   (jnle)      CF=0 et ZF=0 / ZF=0 et SF=OF
+   a >= b        jae  (jnb, jnc)   jge  (jnl)       CF=0 / SF=OF
+   a <  b        jb   (jnae, jc)   jl   (jnge)      CF=1 / SF!=OF
+   a <= b        jbe  (jna)        jle  (jng)       CF=1 ou ZF=1 / ZF=1 ou SF!=OF
+
+   Mnémotechnique : Above / Below pour les non signés,
+                    Greater / Less pour les signés.
+
+   Autres : js / jns (signe), jo / jno (débordement signé), jc / jnc (retenue),
+            jrcxz (saute si rcx = 0, sans cmp).
+
+C'EST ICI QUE LE SIGNE COMPTE (rappel du 2.4) :
+   mov al, 0xFF        ; 255 ou -1 ?
+   cmp al, 1
+   ja  .plus_grand     ; SAUTE : en non signé, 255 > 1
+   jg  .plus_grand     ; NE SAUTE PAS : en signé, -1 < 1
+
+8.4 Traduire un if
+------------------
+On saute par-dessus le bloc quand la condition est FAUSSE, donc on utilise la
+condition INVERSE.
+
+   // C : if (a == 5) { b = 1; }
+       cmp rax, 5
+       jne .fin_si         ; si a != 5, on saute le bloc
+       mov rbx, 1
+   .fin_si:
+
+   // C : if (a < b) { max = b; } else { max = a; }   (signés)
+       cmp rax, rbx
+       jge .sinon
+       mov rcx, rbx
+       jmp .fin_si         ; ne pas oublier de sauter le else !
+   .sinon:
+       mov rcx, rax
+   .fin_si:
+
+   // C : if (a > 0 && a < 10) { ... }
+       cmp rax, 0
+       jle .fin_si         ; première condition fausse : on sort
+       cmp rax, 10
+       jge .fin_si         ; deuxième condition fausse : on sort
+       ; ... bloc ...
+   .fin_si:
+
+   // C : if (c == ' ' || c == '\n') { ... }
+       cmp al, ' '
+       je .bloc            ; première vraie : on entre directement
+       cmp al, 10
+       jne .fin_si         ; deuxième fausse aussi : on sort
+   .bloc:
+       ; ... bloc ...
+   .fin_si:
+
+Astuce : tester si x est dans [min, max] avec UN seul saut :
+       sub eax, 'a'        ; eax = c - 'a'
+       cmp eax, 'z' - 'a'  ; en non signé, un c < 'a' devient énorme
+       jbe .est_minuscule  ; donc un seul test couvre les deux bornes
+
+8.5 Traduire les boucles
+------------------------
+   // C : while (i < n) { ...; i++; }
+   .tant_que:
+       cmp rcx, rdx
+       jge .fin
+       ; ... corps ...
+       inc rcx
+       jmp .tant_que
+   .fin:
+
+   // C : do { ... } while (--n != 0);      (le plus efficace)
+   .faire:
+       ; ... corps ...
+       dec rcx
+       jnz .faire
+
+   // C : for (i = 0; i < 10; i++) { ... }
+       xor ecx, ecx
+   .pour:
+       cmp ecx, 10
+       jge .fin_pour
+       ; ... corps (sans modifier ecx, ou en le sauvegardant) ...
+       inc ecx
+       jmp .pour
+   .fin_pour:
+
+Les compilateurs transforment souvent while en do-while précédé d'un test :
+un seul saut par tour au lieu de deux.
+
+8.6 loop
+--------
+   mov ecx, 10
+   .boucle:
+       ; ...
+       loop .boucle        ; dec rcx, puis saute si rcx != 0
+
+loop ne modifie pas les drapeaux. Il est lent sur beaucoup de processeurs
+modernes : les compilateurs ne l'utilisent jamais, préfère dec + jnz.
+
+8.7 Conditions sans saut : setcc et cmovcc
+------------------------------------------
+   cmp rax, rbx
+   setl cl             ; cl = 1 si rax < rbx (signé), sinon 0
+                       ; (setcc écrit UN OCTET : movzx ecx, cl ensuite)
+
+   cmp rax, rbx
+   cmovl rax, rbx      ; si rax < rbx alors rax = rbx   (rax = max)
+                       ; cmovcc n'accepte pas de constante comme source
+
+Éviter un saut peut accélérer le code : le processeur n'a pas à deviner de
+quel côté le saut va partir.
+
+8.8 Traduire un switch : la table de sauts
+------------------------------------------
+   ; ===== fichier switch.asm =====
+   ; Selon choix (0 à 3), calcule un résultat différent.
+   ; Code de sortie : 30 pour choix = 2.
+   bits 64
+   default rel
+
+   section .data
+   ; adresses du code de chaque cas (nom complet des étiquettes locales, 8.9)
+   table:  dq _start.cas0, _start.cas1, _start.cas2, _start.cas3
+
+   section .text
+   global _start
+
+   _start:
+       mov eax, 2              ; choix = 2
+       cmp eax, 3
+       ja .defaut              ; hors de la table : cas par défaut
+                               ; (ja : non signé, un négatif est aussi rejeté)
+       lea rbx, [table]
+       jmp [rbx + rax*8]       ; saute à table[choix]
+
+   .cas0:  mov edi, 10
+           jmp .fin
+   .cas1:  mov edi, 20
+           jmp .fin
+   .cas2:  mov edi, 30
+           jmp .fin
+   .cas3:  mov edi, 40
+           jmp .fin
+   .defaut:
+           mov edi, 99
+   .fin:
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de switch.asm =====
+
+8.9 Le piège des étiquettes locales hors de leur fonction
+---------------------------------------------------------
+Une étiquette .cas0 écrite dans .data est rattachée à la dernière étiquette
+normale rencontrée AVANT elle dans le fichier. Dans la table du 8.8, écrire
+simplement ".cas0" voudrait dire "table.cas0", qui n'existe pas : NASM
+refuserait ("symbol `table.cas0' not defined"). Pour faire référence à une
+étiquette locale depuis ailleurs, on écrit son nom complet : _start.cas0.
+
+
+EXERCICES DU CHAPITRE 8
+-----------------------
+8.1  Renvoie comme code de sortie le maximum de trois nombres signés rangés
+     dans rax, rbx et rcx, d'abord avec des sauts, puis avec cmov.
+8.2  Calcule le 12e nombre de Fibonacci (F1 = F2 = 1) avec une boucle.
+     Résultat : 144.
+8.3  Calcule le PGCD de 1071 et 462 (algorithme d'Euclide avec div).
+     Résultat : 21.
+8.4  Renvoie le nombre de nombres premiers inférieurs à 100 (résultat : 25).
+
+
+================================================================================
+ 9. LA PILE
+================================================================================
+
+9.1 Qu'est-ce que la pile ?
+---------------------------
+La pile (stack) est une zone de mémoire gérée comme une pile d'assiettes :
+on pose sur le dessus, on reprend sur le dessus (LIFO : dernier entré,
+premier sorti). Le registre rsp contient l'adresse du SOMMET.
+
+Sous x86, la pile GRANDIT VERS LE BAS : empiler DIMINUE rsp.
+
+   adresses hautes
+   +----------------+
+   |      ...       |   données empilées plus tôt
+   +----------------+
+   |    valeur 1    |
+   +----------------+
+   |    valeur 2    |  <-- rsp (sommet)
+   +----------------+
+   |  zone libre    |   la pile grandira par ici
+   adresses basses
+
+Linux donne une pile de 8 Mo par défaut au programme.
+
+9.2 push et pop
+---------------
+   push rax        ; rsp = rsp - 8, puis [rsp] = rax
+   pop rbx         ; rbx = [rsp], puis rsp = rsp + 8
+
+   push rax        est équivalent à    sub rsp, 8
+                                       mov [rsp], rax
+   pop rbx         est équivalent à    mov rbx, [rsp]
+                                       add rsp, 8
+
+En 64 bits, push et pop manipulent 8 octets (ou 2 avec un registre 16 bits,
+jamais 4). push 42 empile une constante 32 bits étendue à 64. pushfq et popfq
+empilent et dépilent RFLAGS.
+
+Exemple : échanger rax et rbx avec la pile
+   push rax
+   push rbx
+   pop rax         ; rax reçoit l'ancien rbx
+   pop rbx         ; rbx reçoit l'ancien rax
+
+RÈGLE D'OR : autant de pop que de push, dans l'ordre inverse. Sinon ret
+(9.3) repartira vers une mauvaise adresse et le programme plantera.
+
+9.3 call et ret
+---------------
+   call fonction   ; push de l'adresse de l'instruction suivante,
+                   ; puis jmp fonction
+   ret             ; pop dans rip : on revient juste après le call
+
+   _start:
+       call ma_fonction        ; empile l'adresse de "mov edi, eax"
+       mov edi, eax            ; <- ret revient ici
+       ...
+   ma_fonction:
+       mov eax, 7
+       ret                     ; dépile l'adresse de retour dans rip
+
+L'adresse de retour est une donnée comme une autre sur la pile. Si une
+fonction écrit en dehors de ses variables locales, elle peut l'écraser : au
+ret, le processeur saute n'importe où. C'est le principe des attaques par
+débordement de tampon.
+
+9.4 Les variables locales et le cadre de pile
+---------------------------------------------
+Une fonction réserve la place de ses variables locales en diminuant rsp.
+Pour s'y retrouver, on utilise souvent rbp comme repère fixe : c'est le
+CADRE DE PILE (stack frame).
+
+   fonction:
+       push rbp                ; sauvegarde le rbp de l'appelant
+       mov rbp, rsp            ; rbp = repère fixe pour cette fonction
+       sub rsp, 32             ; 32 octets pour les variables locales
+
+       mov qword [rbp - 8], 5  ; première variable locale
+       mov qword [rbp - 16], 7 ; deuxième variable locale
+       ; ...
+
+       mov rsp, rbp            ; libère les variables locales
+       pop rbp                 ; restaure le rbp de l'appelant
+       ret
+
+État de la pile pendant la fonction :
+
+   [rbp + 16]   7e argument éventuel (10.6)
+   [rbp + 8]    adresse de retour (empilée par call)
+   [rbp]        ancien rbp (empilé par push rbp)   <-- rbp
+   [rbp - 8]    variable locale 1
+   [rbp - 16]   variable locale 2
+   [rbp - 24]   ...
+   [rbp - 32]                                      <-- rsp
+
+"mov rsp, rbp" puis "pop rbp" s'écrit aussi avec une seule instruction :
+leave. (enter existe aussi, mais il est lent : on ne l'utilise pas.)
+
+Le cadre avec rbp est facultatif en 64 bits (on peut tout adresser par
+rapport à rsp), mais il simplifie beaucoup le débogage.
+
+9.5 L'alignement de la pile
+---------------------------
+La convention Linux exige que rsp soit un MULTIPLE DE 16 au moment d'un
+call. Donc, à l'entrée d'une fonction (le call venant d'empiler 8 octets),
+rsp vaut "multiple de 16, moins 8".
+
+   - Au démarrage du programme (_start), Linux donne une pile alignée.
+   - Dans une fonction, push rbp rétablit l'alignement. Ensuite, réserve
+     toujours un multiple de 16 (sub rsp, 16 / 32 / 48...), en comptant les
+     push supplémentaires.
+
+Un défaut d'alignement ne gêne pas ton propre code, mais les fonctions de la
+bibliothèque C (printf...) utilisent des instructions SSE qui plantent avec
+une pile mal alignée (chapitre 14).
+
+9.6 Le débordement de pile
+--------------------------
+Une récursion sans fin, ou "sub rsp, 100000000", fait sortir rsp de la zone de
+pile : Segmentation fault.
+
+
+EXERCICES DU CHAPITRE 9
+-----------------------
+9.1  Empile les valeurs 1, 2, 3, 4, 5, puis dépile-les en calculant
+     10*a + b à chaque étape pour reconstituer un nombre. Quel nombre
+     obtiens-tu ? Conclus sur l'ordre de la pile.
+9.2  Dessine l'état de la pile (adresses relatives à rsp au départ) après :
+     push rax / push rbx / call f / (dans f) push rbp / mov rbp, rsp /
+     sub rsp, 16.
+
+
+================================================================================
+ 10. LES FONCTIONS ET LA CONVENTION D'APPEL
+================================================================================
+
+10.1 Pourquoi une convention ?
+------------------------------
+call et ret ne disent rien sur la manière de passer les arguments, de
+renvoyer un résultat, ou sur les registres qu'une fonction a le droit
+d'abîmer. Pour que du code écrit par des personnes (ou des compilateurs)
+différentes puisse s'appeler, tout le monde suit la même CONVENTION D'APPEL.
+Sous Linux x86-64, c'est la convention System V AMD64.
+
+10.2 La convention System V AMD64
+---------------------------------
+   ARGUMENTS ENTIERS ET ADRESSES (dans l'ordre) :
+      1er : rdi     2e : rsi     3e : rdx     4e : rcx     5e : r8     6e : r9
+      7e et suivants : sur la pile (10.6)
+
+   ARGUMENTS FLOTTANTS : xmm0 à xmm7 (chapitre 15)
+
+   VALEUR DE RETOUR : rax (et rdx pour une valeur de 128 bits)
+                      xmm0 pour un flottant
+
+   REGISTRES PRÉSERVÉS (callee-saved) : rbx, rbp, rsp, r12, r13, r14, r15
+      Une fonction qui les modifie DOIT les restaurer avant ret.
+      L'appelant peut compter sur eux après un call.
+
+   REGISTRES LIBRES (caller-saved) : rax, rcx, rdx, rsi, rdi, r8 à r11,
+      xmm0 à xmm15
+      Une fonction peut les écraser. Si l'appelant a besoin de leur valeur
+      après un call, c'est à lui de la sauvegarder.
+
+   PILE : alignée sur 16 octets au moment du call (9.5).
+   DRAPEAU DF : doit valoir 0 à l'appel et au retour (chapitre 12).
+
+Moyen mnémotechnique pour l'ordre des arguments :
+   "Diane's Silk Dress Costs $89"   ->  Di  Si  Dx  Cx  8  9
+
+10.3 Modèles de fonctions
+-------------------------
+Fonction "feuille" (n'appelle personne), utilise seulement des registres
+libres : rien à sauvegarder.
+
+   ; uint64_t maximum(uint64_t a, uint64_t b)
+   maximum:
+       mov rax, rdi
+       cmp rdi, rsi
+       cmovb rax, rsi          ; si a < b alors rax = b
+       ret
+
+Fonction qui utilise des registres préservés et appelle d'autres fonctions :
+
+   ma_fonction:
+       push rbx                ; sauvegarde des registres préservés utilisés
+       push r12
+       push r13                ; 3 push + adresse de retour = 32 octets :
+                               ; la pile est alignée pour les call
+       mov rbx, rdi            ; rbx survivra aux appels
+       ; ... call autre_fonction ...
+       pop r13                 ; restauration dans l'ORDRE INVERSE
+       pop r12
+       pop rbx
+       ret
+
+Avec un nombre PAIR de push après l'entrée, pense à ajouter sub rsp, 8 pour
+aligner (8 + 2*8 = 24, pas un multiple de 16).
+
+10.4 Exemple complet : récursivité, variables locales et pointeurs
+------------------------------------------------------------------
+   ; ===== fichier fonctions.asm =====
+   ; factorielle récursive et division renvoyant deux résultats par pointeurs.
+   ; Code de sortie : 5! + 47/10 + 47%10 = 120 + 4 + 7 = 131.
+   bits 64
+   default rel
+
+   section .text
+   global _start
+
+   _start:
+       ; --- factorielle(5) ---
+       mov edi, 5
+       call factorielle
+       mov rbx, rax                ; rbx = 120 (préservé par les appels)
+
+       ; --- division(47, 10, &q, &r) avec q et r en variables locales ---
+       sub rsp, 16                 ; [rsp] = q, [rsp + 8] = r
+       mov edi, 47
+       mov esi, 10
+       lea rdx, [rsp]              ; 3e argument : adresse de q
+       lea rcx, [rsp + 8]          ; 4e argument : adresse de r
+       call division
+       add rbx, [rsp]              ; + q
+       add rbx, [rsp + 8]          ; + r
+       add rsp, 16                 ; libère les variables locales
+
+       mov rdi, rbx
+       mov eax, 60
+       syscall
+
+   ; uint64_t factorielle(uint64_t n)
+   factorielle:
+       cmp rdi, 1
+       ja .recursion
+       mov eax, 1                  ; cas d'arrêt : 0! = 1! = 1
+       ret
+   .recursion:
+       push rdi                    ; rdi n'est pas préservé par un appel :
+                                   ; on sauvegarde n (et on aligne la pile)
+       dec rdi
+       call factorielle            ; rax = (n - 1)!
+       pop rdi                     ; on récupère n
+       imul rax, rdi               ; rax = n * (n - 1)!
+       ret
+
+   ; void division(uint64_t a, uint64_t b, uint64_t *q, uint64_t *r)
+   division:
+       mov r8, rdx                 ; div va écraser rdx : on garde q ailleurs
+       mov rax, rdi
+       xor edx, edx
+       div rsi                     ; rax = a / b, rdx = a % b
+       mov [r8], rax               ; *q = quotient
+       mov [rcx], rdx              ; *r = reste
+       ret
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de fonctions.asm =====
+
+Chaque appel récursif empile 16 octets (n et l'adresse de retour) : c'est
+la pile d'appels que tu vois avec "backtrace" dans gdb.
+
+La fonction division montre ce qu'est vraiment un "passage par pointeur" du
+C : l'appelant donne des adresses (lea), la fonction écrit à ces adresses
+(mov [r8], rax).
+
+10.5 Sauvegarder les registres de l'appelant
+--------------------------------------------
+   mov rcx, 10             ; compteur de boucle
+   .boucle:
+       push rcx            ; rcx est "libre" : afficher_nombre peut
+       sub rsp, 8          ; l'écraser, donc on le sauvegarde (et on aligne)
+       call afficher_nombre
+       add rsp, 8
+       pop rcx
+       dec rcx
+       jnz .boucle
+
+Plus simple : utilise un registre préservé (rbx, r12...) comme compteur, et
+sauvegarde-le une seule fois à l'entrée de ta fonction.
+
+10.6 Plus de six arguments
+--------------------------
+L'appelant empile les arguments supplémentaires, du DERNIER au 7e, puis
+nettoie la pile après l'appel.
+
+   ; f(1, 2, 3, 4, 5, 6, 7), pile alignée avant ces lignes
+   sub rsp, 8              ; alignement : 1 push (8 octets) + 8 = 16
+   push 7                  ; 7e argument
+   mov edi, 1
+   mov esi, 2
+   mov edx, 3
+   mov ecx, 4
+   mov r8d, 5
+   mov r9d, 6
+   call f
+   add rsp, 16             ; retire l'argument et l'alignement
+
+Dans f, après push rbp / mov rbp, rsp : 7e argument en [rbp + 16]. Avec
+8 arguments, on aurait push 8 puis push 7 (16 octets, pas de sub rsp) et le
+8e serait en [rbp + 24].
+
+10.7 La zone rouge
+------------------
+Sous Linux, les 128 octets SOUS rsp forment la "red zone" : une fonction
+feuille peut y ranger des données sans modifier rsp, car ni les signaux ni
+Linux n'y écriront. C'est une optimisation des compilateurs. Dans un noyau,
+une interruption écrit justement sous rsp : c'est pour ça qu'on compile le
+code noyau avec -mno-red-zone.
+
+
+EXERCICES DU CHAPITRE 10
+------------------------
+10.1 Écris uint64_t puissance(uint64_t base, uint64_t exp) et renvoie
+     puissance(3, 4) comme code de sortie (81).
+10.2 Écris une fonction récursive fibonacci(n) (très lente, mais formatrice
+     pour la pile) et renvoie fibonacci(10) (55).
+10.3 Écris void echanger(uint64_t *a, uint64_t *b) et teste-la sur deux
+     variables locales de _start.
+10.4 Écris uint64_t somme_tableau(const uint64_t *t, uint64_t n). Garde-la :
+     on l'appellera depuis le C au chapitre 14.
+
+
+================================================================================
+ 11. LES APPELS SYSTÈME LINUX
+================================================================================
+
+11.1 Le principe
+----------------
+Un programme normal n'a pas le droit de parler directement au matériel
+(écran, disque, clavier). Le processeur l'en empêche : il tourne en "mode
+utilisateur" (anneau 3), alors que le noyau tourne en "mode noyau"
+(anneau 0). Pour obtenir un service, le programme fait un APPEL SYSTÈME :
+l'instruction syscall bascule le processeur en mode noyau, Linux fait le
+travail, puis rend la main juste après le syscall.
+
+C'est EXACTEMENT ce que font printf, fopen ou malloc à l'intérieur de la
+bibliothèque C : au bout du compte, elles appellent write, open ou mmap.
+
+11.2 La convention des appels système
+-------------------------------------
+   rax           numéro de l'appel système
+   rdi           1er argument
+   rsi           2e argument
+   rdx           3e argument
+   r10           4e argument   (ATTENTION : r10, et non rcx comme les
+                               fonctions !)
+   r8            5e argument
+   r9            6e argument
+   syscall       exécute l'appel
+   rax           valeur de retour
+
+   syscall ÉCRASE rcx et r11 (le processeur y range rip et rflags).
+   Tous les autres registres sont conservés.
+
+11.3 Les appels système les plus utiles
+---------------------------------------
+   N°    Nom          Arguments                              Retour
+   ---   ----------   ------------------------------------   ---------------
+   0     read         fd, adresse tampon, taille max         octets lus
+   1     write        fd, adresse tampon, taille             octets écrits
+   2     open         adresse du nom, drapeaux, droits       fd
+   3     close        fd                                     0
+   8     lseek        fd, décalage, origine                  position
+   9     mmap         adresse, taille, protection,           adresse
+                      drapeaux, fd, décalage
+   11    munmap       adresse, taille                        0
+   12    brk          nouvelle fin du tas                    fin du tas
+   35    nanosleep    adresse d'un timespec, adresse ou 0    0
+   39    getpid       -                                      pid
+   57    fork         -                                      pid ou 0
+   59    execve       chemin, argv, envp                     (ne revient pas)
+   60    exit         code                                   (ne revient pas)
+   62    kill         pid, signal                            0
+   201   time         adresse ou 0                           secondes
+   231   exit_group   code (termine tous les threads)        (ne revient pas)
+
+   Descripteurs de fichiers (fd) ouverts au démarrage :
+      0 = entrée standard (clavier)   1 = sortie standard   2 = erreurs
+
+La liste complète : "man 2 syscalls", et les numéros dans le fichier
+/usr/include/asm/unistd_64.h.
+
+11.4 Les erreurs
+----------------
+En cas d'erreur, rax contient une valeur NÉGATIVE entre -4095 et -1 : l'opposé
+du code d'erreur (errno). Par exemple -2 = ENOENT (fichier inexistant),
+-13 = EACCES (permission refusée).
+
+   syscall
+   test rax, rax
+   js .erreur              ; suffisant pour read, write, open, close...
+
+   ; pour mmap, qui renvoie une adresse (pouvant avoir le bit haut à 1) :
+   cmp rax, -4095
+   jae .erreur             ; en non signé, -4095..-1 sont les plus grands
+
+
+11.5 La boîte à outils d'affichage
+----------------------------------
+Voici enfin de quoi afficher des nombres. Ce fichier sera inclus dans les
+programmes suivants avec %include "outils.asm".
+
+   ; ===== fichier outils.asm =====
+   ; Boîte à outils d'affichage pour Linux x86-64.
+   ; À inclure dans un programme avec : %include "outils.asm"
+   ; Toutes les fonctions suivent la convention System V (chapitre 10) :
+   ; elles peuvent écraser rax, rcx, rdx, rsi, rdi, r8 à r11.
+
+   section .text
+
+   ; void afficher_chaine(const char *s)      s terminée par 0
+   afficher_chaine:
+       mov rsi, rdi            ; 2e argument de write : l'adresse du texte
+       xor edx, edx            ; rdx = longueur, calculée ci-dessous
+   .compter:
+       cmp byte [rsi + rdx], 0
+       je .ecrire
+       inc rdx
+       jmp .compter
+   .ecrire:
+       mov eax, 1              ; write
+       mov edi, 1              ; sortie standard
+       syscall
+       ret
+
+   ; void afficher_caractere(char c)
+   afficher_caractere:
+       push rdi                ; le caractère est rangé sur la pile...
+       mov rsi, rsp            ; ...et on donne son ADRESSE à write
+       mov edx, 1
+       mov eax, 1
+       mov edi, 1
+       syscall
+       pop rdi
+       ret
+
+   ; void nouvelle_ligne(void)
+   nouvelle_ligne:
+       mov edi, 10
+       jmp afficher_caractere  ; "appel terminal" : son ret reviendra
+                               ; directement à notre appelant
+
+   ; void afficher_nombre(uint64_t n)         en décimal, non signé
+   afficher_nombre:
+       sub rsp, 32             ; tampon sur la pile (20 chiffres au plus)
+       mov rax, rdi
+       lea rsi, [rsp + 32]     ; rsi = FIN du tampon : on écrit à reculons
+       mov ecx, 10
+   .chiffre:
+       xor edx, edx
+       div rcx                 ; rax = n / 10, rdx = dernier chiffre
+       add dl, '0'             ; valeur -> caractère
+       dec rsi
+       mov [rsi], dl
+       test rax, rax
+       jnz .chiffre            ; tant qu'il reste des chiffres
+       lea rdx, [rsp + 32]
+       sub rdx, rsi            ; longueur = fin - début
+       mov eax, 1
+       mov edi, 1
+       syscall                 ; write(1, rsi, rdx)
+       add rsp, 32
+       ret
+
+   ; void afficher_signe(int64_t n)           en décimal, signé
+   afficher_signe:
+       test rdi, rdi
+       jns afficher_nombre     ; positif : on délègue directement
+       push rdi                ; sauvegarde n (et aligne la pile)
+       mov edi, '-'
+       call afficher_caractere
+       pop rdi
+       neg rdi                 ; valeur absolue
+       jmp afficher_nombre
+
+   ; void quitter(int code)
+   quitter:
+       mov eax, 60             ; exit
+       syscall
+   ; ===== fin de outils.asm =====
+
+Pourquoi afficher_nombre écrit-il à reculons ? La division par 10 donne les
+chiffres du DERNIER au premier (1234 -> 4, 3, 2, 1). En remplissant le tampon
+de la fin vers le début, ils se retrouvent dans le bon ordre.
+
+Remarque : afficher_signe fonctionne même pour le plus petit int64_t
+(-9223372036854775808) : neg le laisse inchangé, mais lu en non signé c'est
+bien 9223372036854775808.
+
+Programme de test :
+
+   ; ===== fichier nombres.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   titre:  db "Test de la boîte à outils", 10, 0
+
+   section .text
+   global _start
+
+   _start:
+       lea rdi, [titre]
+       call afficher_chaine
+
+       mov rdi, 0xFFFFFFFFFFFFFFFF     ; le plus grand uint64_t
+       call afficher_nombre
+       call nouvelle_ligne
+
+       mov rdi, -1234
+       call afficher_signe
+       call nouvelle_ligne
+
+       mov ebx, 1                      ; rbx : préservé par nos fonctions
+   .carres:
+       mov rdi, rbx
+       imul rdi, rbx                   ; rdi = i * i
+       call afficher_nombre
+       mov edi, ' '
+       call afficher_caractere
+       inc ebx
+       cmp ebx, 10
+       jbe .carres
+       call nouvelle_ligne
+
+       xor edi, edi
+       call quitter
+
+   %include "outils.asm"
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de nombres.asm =====
+
+   Affiche :
+   Test de la boîte à outils
+   18446744073709551615
+   -1234
+   1 4 9 16 25 36 49 64 81 100
+
+
+11.6 Lire le clavier : read
+---------------------------
+   ; ===== fichier majuscules.asm =====
+   ; Recopie l'entrée standard en mettant les lettres en majuscules.
+   ; Essai : ./majuscules   (tape du texte, Ctrl+D pour finir)
+   ;    ou : echo "bonjour" | ./majuscules
+   bits 64
+   default rel
+
+   TAILLE  equ 4096
+
+   section .bss
+   tampon: resb TAILLE
+
+   section .text
+   global _start
+
+   _start:
+   .lire:
+       xor eax, eax            ; read
+       xor edi, edi            ; entrée standard
+       lea rsi, [tampon]
+       mov edx, TAILLE
+       syscall                 ; rax = nombre d'octets lus
+       test rax, rax
+       jle .fin                ; 0 = fin de l'entrée, négatif = erreur
+
+       mov rdx, rax            ; rdx = nombre d'octets (servira pour write)
+       xor ecx, ecx
+   .convertir:
+       mov al, [rsi + rcx]
+       sub al, 'a'
+       cmp al, 'z' - 'a'       ; astuce du 8.4 : un seul test pour a..z
+       ja .suivant
+       sub byte [rsi + rcx], 32
+   .suivant:
+       inc rcx
+       cmp rcx, rdx
+       jb .convertir
+
+       mov eax, 1              ; write(1, tampon, n)
+       mov edi, 1              ; rsi et rdx sont toujours bons : syscall
+       syscall                 ; ne modifie que rax, rcx et r11
+       jmp .lire
+   .fin:
+       xor edi, edi
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de majuscules.asm =====
+
+Au clavier, read rend la main à chaque Entrée, avec la ligne tapée (retour à
+la ligne compris).
+
+Les lettres accentuées ne sont pas converties : "ça" devient "çA". En UTF-8,
+"ç" occupe deux octets (0xC3 0xA7), qui ne sont pas dans l'intervalle a..z.
+Gérer l'UTF-8 demande de décoder ces séquences d'octets.
+
+
+11.7 Les arguments de la ligne de commande
+------------------------------------------
+Au démarrage, Linux range sur la pile : argc, puis les adresses des
+arguments (argv), puis 0, puis les variables d'environnement.
+
+   ; ===== fichier arguments.asm =====
+   ; Affiche chaque argument avec son numéro.
+   ; Essai : ./arguments bonjour "deux mots" 42
+   bits 64
+   default rel
+
+   section .rodata
+   separateur: db " : ", 0
+
+   section .text
+   global _start
+
+   _start:
+       mov r12, [rsp]          ; r12 = argc
+       lea r13, [rsp + 8]      ; r13 = argv, l'ADRESSE du tableau d'adresses
+       xor ebx, ebx            ; i = 0
+   .boucle:
+       cmp rbx, r12
+       jae .fin
+       mov rdi, rbx
+       call afficher_nombre
+       lea rdi, [separateur]
+       call afficher_chaine
+       mov rdi, [r13 + rbx*8]  ; rdi = argv[i] : une adresse lue en mémoire
+       call afficher_chaine
+       call nouvelle_ligne
+       inc rbx
+       jmp .boucle
+   .fin:
+       xor edi, edi
+       call quitter
+
+   %include "outils.asm"
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de arguments.asm =====
+
+   ./arguments bonjour "deux mots" 42
+   0 : ./arguments
+   1 : bonjour
+   2 : deux mots
+   3 : 42
+
+
+11.8 Les fichiers : open, write, close
+--------------------------------------
+   ; ===== fichier fichier.asm =====
+   ; Crée sortie.txt et y écrit une ligne.
+   ; Code de sortie : 0 si tout va bien, sinon le numéro d'erreur (errno).
+   bits 64
+   default rel
+
+   O_WRONLY    equ 0o1
+   O_CREAT     equ 0o100
+   O_TRUNC     equ 0o1000
+
+   section .rodata
+   nom:        db "sortie.txt", 0
+   contenu:    db "Écrit depuis l'assembleur !", 10
+   LONGUEUR    equ $ - contenu
+
+   section .text
+   global _start
+
+   _start:
+       mov eax, 2                          ; open
+       lea rdi, [nom]
+       mov esi, O_WRONLY | O_CREAT | O_TRUNC
+       mov edx, 0o644                      ; droits : rw-r--r--
+       syscall
+       test rax, rax
+       js .erreur
+       mov rbx, rax                        ; rbx = descripteur du fichier
+
+       mov eax, 1                          ; write
+       mov rdi, rbx
+       lea rsi, [contenu]
+       mov edx, LONGUEUR
+       syscall
+       test rax, rax
+       js .erreur
+
+       mov eax, 3                          ; close
+       mov rdi, rbx
+       syscall
+
+       xor edi, edi
+       mov eax, 60
+       syscall
+
+   .erreur:
+       neg rax                             ; -errno -> errno
+       mov rdi, rax
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de fichier.asm =====
+
+   ./fichier ; echo $? ; cat sortie.txt
+
+Les valeurs des drapeaux (O_CREAT...) sont en octal dans les en-têtes C :
+d'où la notation 0o de NASM. "strace ./fichier" montre les appels système
+tels que Linux les voit.
+
+
+11.9 Le tas : réserver de la mémoire avec mmap
+----------------------------------------------
+malloc n'existe pas en assembleur : il faut demander de la mémoire au noyau.
+mmap réserve des pages (par 4096 octets) n'importe où dans l'espace
+d'adressage.
+
+   ; ===== fichier tas.asm =====
+   ; Réserve un tableau de 1000 qword, le remplit avec i * i, affiche t[999].
+   bits 64
+   default rel
+
+   PROT_READ       equ 1
+   PROT_WRITE      equ 2
+   MAP_PRIVATE     equ 0x02
+   MAP_ANONYMOUS   equ 0x20
+   NB              equ 1000
+   TAILLE          equ NB * 8
+
+   section .text
+   global _start
+
+   _start:
+       mov eax, 9                          ; mmap
+       xor edi, edi                        ; adresse : au choix du noyau
+       mov esi, TAILLE                     ; taille
+       mov edx, PROT_READ | PROT_WRITE     ; protection
+       mov r10d, MAP_PRIVATE | MAP_ANONYMOUS   ; 4e argument : r10 !
+       mov r8, -1                          ; pas de fichier
+       xor r9d, r9d                        ; décalage 0
+       syscall
+       cmp rax, -4095
+       jae .erreur
+       mov rbx, rax                        ; rbx = t (notre "malloc")
+
+       xor ecx, ecx                        ; i = 0
+   .remplir:
+       mov rax, rcx
+       imul rax, rcx
+       mov [rbx + rcx*8], rax              ; t[i] = i * i
+       inc rcx
+       cmp rcx, NB
+       jb .remplir
+
+       mov rdi, [rbx + (NB - 1)*8]         ; t[999]
+       call afficher_nombre                ; 998001
+       call nouvelle_ligne
+
+       mov eax, 11                         ; munmap : notre "free"
+       mov rdi, rbx
+       mov esi, TAILLE
+       syscall
+
+       xor edi, edi
+       call quitter
+   .erreur:
+       mov edi, 1
+       call quitter
+
+   %include "outils.asm"
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de tas.asm =====
+
+Un vrai malloc découpe de grandes zones obtenues par mmap (ou brk) en petits
+blocs, et garde la liste des blocs libres. Écrire un allocateur simple est un
+excellent exercice (et une nécessité dans un noyau).
+
+
+EXERCICES DU CHAPITRE 11
+------------------------
+11.1 Écris un programme qui demande "Comment t'appelles-tu ? ", lit la
+     réponse et affiche "Bonjour " suivi du prénom.
+11.2 Écris lire_nombre : lit une ligne au clavier et la convertit en
+     entier (rax = rax * 10 + chiffre). Additionne deux nombres saisis et
+     affiche la somme.
+11.3 Écris un "cat" minimal : ouvre le fichier donné en argv[1], lis-le par
+     blocs avec read et écris chaque bloc sur la sortie standard.
+11.4 Écris afficher_hexa(uint64_t n), qui affiche n en hexadécimal sur
+     16 chiffres (utilise shr, and 0xF et une table "0123456789ABCDEF").
+
+
+================================================================================
+ 12. LES INSTRUCTIONS DE CHAÎNES
+================================================================================
+
+12.1 Le principe
+----------------
+x86 possède des instructions spécialisées pour traiter des zones de mémoire.
+Elles utilisent des registres fixes :
+   rsi   adresse SOURCE
+   rdi   adresse DESTINATION
+   rcx   COMPTEUR (avec le préfixe rep)
+   al / ax / eax / rax   valeur (selon la taille)
+
+   movsb     copie l'octet [rsi] vers [rdi], puis rsi++ et rdi++
+   movsw / movsd / movsq : pareil avec 2, 4 ou 8 octets
+   stosb     écrit al dans [rdi], puis rdi++
+   lodsb     lit [rsi] dans al, puis rsi++
+   scasb     compare al avec [rdi] (drapeaux), puis rdi++
+   cmpsb     compare [rsi] avec [rdi] (drapeaux), puis rsi++ et rdi++
+
+Le DRAPEAU DE DIRECTION DF décide du sens : DF = 0, les adresses augmentent
+(le cas normal) ; DF = 1, elles diminuent. cld met DF à 0, std le met à 1.
+La convention d'appel garantit DF = 0 ; si tu fais std, refais cld après.
+
+12.2 Les préfixes de répétition
+-------------------------------
+   rep       répète l'instruction rcx fois (rcx diminue jusqu'à 0)
+   repe      répète tant que rcx != 0 ET que les éléments sont égaux (ZF = 1)
+   repne     répète tant que rcx != 0 ET qu'ils sont différents (ZF = 0)
+
+   ; memcpy(rdi, rsi, rcx)
+   rep movsb
+
+   ; memset(rdi, al, rcx)
+   rep stosb
+
+   ; remplir 10 qword avec 0
+   xor eax, eax
+   mov ecx, 10
+   rep stosq
+
+Sur les processeurs récents, rep movsb et rep stosb sont très optimisés en
+interne : c'est souvent la meilleure façon de copier un bloc.
+
+12.3 Exemple complet
+--------------------
+   ; ===== fichier chaines.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   source:     db "assembleur", 0
+   LONG_SRC    equ $ - source          ; 11, zéro final compris
+
+   section .bss
+   copie:      resb 64
+
+   section .text
+   global _start
+
+   _start:
+       ; --- strlen avec repne scasb ---
+       lea rdi, [source]
+       xor eax, eax            ; al = 0 : l'octet cherché
+       mov rcx, -1             ; compteur "infini"
+       repne scasb             ; avance tant que [rdi] != 0
+       not rcx                 ; rcx = longueur + 1
+       dec rcx                 ; rcx = longueur
+       mov rdi, rcx
+       call afficher_nombre    ; 10
+       call nouvelle_ligne
+
+       ; --- memset : remplir copie de '*' ---
+       lea rdi, [copie]
+       mov al, '*'
+       mov ecx, 20
+       rep stosb
+       mov byte [rdi], 0       ; rdi pointe juste après le dernier '*'
+       lea rdi, [copie]
+       call afficher_chaine    ; ********************
+       call nouvelle_ligne
+
+       ; --- memcpy : copier source dans copie ---
+       lea rsi, [source]
+       lea rdi, [copie]
+       mov ecx, LONG_SRC
+       rep movsb
+       lea rdi, [copie]
+       call afficher_chaine    ; assembleur
+       call nouvelle_ligne
+
+       ; --- comparaison avec repe cmpsb ---
+       lea rsi, [source]
+       lea rdi, [copie]
+       mov ecx, LONG_SRC
+       repe cmpsb              ; s'arrête au premier octet différent
+       sete dil                ; ZF = 1 : tout était égal
+       movzx edi, dil
+       call quitter            ; code de sortie 1 = identiques
+
+   %include "outils.asm"
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de chaines.asm =====
+
+
+EXERCICES DU CHAPITRE 12
+------------------------
+12.1 Écris compter_caractere(const char *s, char c) avec lodsb.
+12.2 Écris deplacer(dest, src, n), l'équivalent de memmove : si la zone
+     de destination commence APRÈS la source et la chevauche, une copie
+     normale écraserait la source avant de la lire. Copie alors à reculons,
+     avec std, rep movsb et cld (attention aux adresses de départ).
+
+
+================================================================================
+ 13. LES MACROS ET LE PRÉPROCESSEUR DE NASM
+================================================================================
+
+13.1 Constantes : equ, %define, %assign
+---------------------------------------
+   TAILLE      equ 100             ; constante numérique, évaluée une fois
+   %define ECRAN 0xB8000           ; remplacement de TEXTE (comme #define)
+   %define CARRE(x) ((x) * (x))    ; macro d'une ligne avec paramètre
+   %assign i 5                     ; variable numérique du préprocesseur,
+   %assign i i + 1                 ;   réaffectable (i vaut 6)
+   %undef ECRAN
+
+13.2 Macros de plusieurs lignes
+-------------------------------
+   %macro nom nombre_de_paramètres
+       ... corps, avec %1, %2 ... pour les paramètres ...
+   %endmacro
+
+   %macro ecrire 2                 ; ecrire adresse, longueur
+       mov eax, 1
+       mov edi, 1
+       lea rsi, [%1]
+       mov edx, %2
+       syscall
+   %endmacro
+
+   ecrire message, LONGUEUR        ; remplacé par les 5 lignes
+
+Nombre de paramètres variable, valeurs par défaut :
+   %macro quitter_avec 0-1 0       ; de 0 à 1 paramètre, 0 par défaut
+       mov edi, %1
+       mov eax, 60
+       syscall
+   %endmacro
+
+   quitter_avec                    ; mov edi, 0
+   quitter_avec 3                  ; mov edi, 3
+
+   %0 = nombre de paramètres reçus.
+   %{1}_fin colle du texte après un paramètre (message -> message_fin).
+   %%etiquette crée une étiquette unique à chaque utilisation de la macro.
+
+ATTENTION : une macro recopie son corps à chaque utilisation. Elle ne
+sauvegarde AUCUN registre : ecrire écrase rax, rdi, rsi, rdx, rcx et r11.
+C'est plus rapide qu'un call, mais plus gros.
+
+13.3 Répétitions et conditions
+------------------------------
+   %assign i 0
+   %rep 10                         ; génère 10 lignes
+       dq i * i
+   %assign i i + 1
+   %endrep
+
+   %ifdef DEBUG                    ; assemblé seulement avec nasm -dDEBUG
+       ecrire msg_debug, LONG_DEBUG
+   %endif
+
+   %if TAILLE > 64
+       %error "TAILLE trop grande"
+   %endif
+
+13.4 Inclure des fichiers
+-------------------------
+   %include "outils.asm"           ; copie le fichier ici
+   nasm -I chemin/                 ; dossier de recherche supplémentaire
+
+13.5 Exemple complet
+--------------------
+   ; ===== fichier macros.asm =====
+   ; Essai : nasm -f elf64 macros.asm && ld macros.o -o macros && ./macros
+   ;         puis avec nasm -dDEBUG pour voir le message de débogage
+   bits 64
+   default rel
+
+   %macro ecrire 2
+       mov eax, 1
+       mov edi, 1
+       lea rsi, [%1]
+       mov edx, %2
+       syscall
+   %endmacro
+
+   ; chaine nom, "texte" : définit nom (le texte + retour à la ligne)
+   ; et nom_long (sa longueur)
+   %macro chaine 2
+   %1:         db %2, 10
+   %{1}_long   equ $ - %1
+   %endmacro
+
+   %macro quitter_avec 0-1 0
+       mov edi, %1
+       mov eax, 60
+       syscall
+   %endmacro
+
+   section .rodata
+   chaine salut, "Salut depuis une macro"
+   chaine au_revoir, "Au revoir"
+   chaine debug, "[DEBUG] programme assemblé avec -dDEBUG"
+
+   carres:                         ; table générée : 0, 1, 4, ..., 81
+   %assign i 0
+   %rep 10
+       dq i * i
+   %assign i i + 1
+   %endrep
+
+   section .text
+   global _start
+
+   _start:
+       ecrire salut, salut_long
+   %ifdef DEBUG
+       ecrire debug, debug_long
+   %endif
+       ecrire au_revoir, au_revoir_long
+       lea rbx, [carres]
+       mov rax, [rbx + 9*8]        ; 81
+       quitter_avec eax
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de macros.asm =====
+
+   nasm -E macros.asm      montre le code après le préprocesseur
+
+
+================================================================================
+ 14. MÉLANGER ASSEMBLEUR ET C
+================================================================================
+
+14.1 Appeler une fonction assembleur depuis le C
+------------------------------------------------
+Il suffit que la fonction respecte la convention d'appel (chapitre 10) et
+soit déclarée global.
+
+   ; ===== fichier somme_tableau.asm =====
+   ; int64_t somme_tableau(const int64_t *t, uint64_t n)
+   bits 64
+   default rel
+
+   section .text
+   global somme_tableau
+
+   somme_tableau:
+       xor eax, eax            ; somme = 0
+       test rsi, rsi
+       jz .fin                 ; n == 0
+   .boucle:
+       add rax, [rdi]          ; somme += *t
+       add rdi, 8              ; t++
+       dec rsi
+       jnz .boucle
+   .fin:
+       ret
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de somme_tableau.asm =====
+
+   // ===== fichier principal.c =====
+   #include <stdio.h>
+   #include <stdint.h>
+
+   int64_t somme_tableau(const int64_t *t, uint64_t n);   // prototype
+
+   int main(void)
+   {
+       int64_t t[] = {10, 20, 30, 40, -5};
+       printf("somme = %lld\n", (long long)somme_tableau(t, 5));
+       return 0;
+   }
+   // ===== fin de principal.c =====
+
+   nasm -f elf64 somme_tableau.asm -o somme_tableau.o
+   gcc -std=c23 -Wall -Wextra principal.c somme_tableau.o -o principal
+   ./principal                     -> somme = 95
+
+14.2 Appeler printf depuis l'assembleur
+---------------------------------------
+Le programme est alors lié avec gcc, qui ajoute le code de démarrage de la
+bibliothèque C : on n'écrit plus _start mais main.
+
+   ; ===== fichier bonjour_printf.asm =====
+   bits 64
+   default rel
+
+   extern printf                   ; défini dans la bibliothèque C
+
+   section .rodata
+   format:     db "%s a %d ans et mesure %d cm.", 10, 0
+   nom:        db "Alice", 0
+
+   section .text
+   global main
+
+   main:
+       push rbp                    ; aligne la pile (et sauvegarde rbp)
+       mov rbp, rsp
+
+       lea rdi, [format]           ; 1er argument
+       lea rsi, [nom]              ; 2e
+       mov edx, 30                 ; 3e
+       mov ecx, 165                ; 4e
+       xor eax, eax                ; al = nombre de registres xmm utilisés
+                                   ; (obligatoire pour une fonction variadique)
+       call printf wrt ..plt       ; appel via la PLT (exécutable PIE)
+
+       xor eax, eax                ; return 0
+       pop rbp
+       ret
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de bonjour_printf.asm =====
+
+   nasm -f elf64 bonjour_printf.asm -o bonjour_printf.o
+   gcc bonjour_printf.o -o bonjour_printf
+   ./bonjour_printf                -> Alice a 30 ans et mesure 165 cm.
+
+Les trois pièges :
+   1. "call printf wrt ..plt" : sous Arch, gcc produit des exécutables PIE.
+      Un "call printf" simple donne une erreur d'édition de liens
+      (relocation R_X86_64_PC32...). Autre solution : gcc -no-pie.
+   2. xor eax, eax avant un appel variadique (printf, scanf...).
+   3. La pile doit être alignée : sans le push rbp, printf peut planter
+      (Segmentation fault dans une instruction movaps de la libc).
+
+14.3 Lire l'assembleur produit par gcc
+--------------------------------------
+   gcc -O1 -S -masm=intel -fno-asynchronous-unwind-tables prog.c -o prog.s
+
+produit un fichier .s lisible (syntaxe Intel, mais format GAS). Ou, sur un
+exécutable :
+   objdump -d -M intel --no-show-raw-insn prog | less
+
+Le site Compiler Explorer (godbolt.org) montre le C et l'assembleur côte à
+côte : excellent pour comprendre comment le compilateur traduit chaque
+construction (boucles, switch, structures, pointeurs...).
+
+
+EXERCICES DU CHAPITRE 14
+------------------------
+14.1 Écris en assembleur uint64_t compter_voyelles(const char *s) et
+     appelle-la depuis un programme C.
+14.2 Appelle depuis l'assembleur la fonction qsort de la bibliothèque C sur
+     un tableau de qword, avec une fonction de comparaison écrite en
+     assembleur (un pointeur de fonction, 6.12 !).
+
+
+================================================================================
+ 15. LES NOMBRES À VIRGULE (SSE) EN BREF
+================================================================================
+
+15.1 Les registres xmm
+----------------------
+Les flottants ne passent pas par rax et compagnie, mais par les registres
+128 bits xmm0 à xmm15 (jeu d'instructions SSE, présent sur tous les
+processeurs x86-64). Un double occupe les 64 bits bas d'un xmm.
+
+   Instruction              Effet (sd = "scalar double")
+   ----------------------   --------------------------------------------
+   movsd xmm0, [x]          charger un double
+   movsd [x], xmm0          ranger un double
+   addsd xmm0, xmm1         xmm0 = xmm0 + xmm1
+   subsd xmm0, xmm1         soustraction
+   mulsd xmm0, xmm1         multiplication
+   divsd xmm0, xmm1         division
+   sqrtsd xmm0, xmm1        xmm0 = racine carrée de xmm1
+   cvtsi2sd xmm0, rax       entier -> double
+   cvttsd2si rax, xmm0      double -> entier (troncature)
+   comisd xmm0, xmm1        comparaison : utilise ja, jb, jae, jbe, je
+                            (les sauts NON SIGNÉS, même pour des négatifs)
+   pxor xmm0, xmm0          mettre à 0.0
+
+Pour les float (32 bits) : ss au lieu de sd (movss, addss...).
+
+Convention d'appel : arguments flottants dans xmm0 à xmm7 (dans l'ordre,
+indépendamment des arguments entiers), retour dans xmm0. Tous les xmm sont
+des registres libres (non préservés).
+
+15.2 Exemple : aire d'un cercle
+-------------------------------
+   ; ===== fichier cercle.asm =====
+   bits 64
+   default rel
+
+   extern printf
+
+   section .rodata
+   pi:         dq 3.141592653589793
+   rayon:      dq 2.5
+   format:     db "Aire d'un cercle de rayon %.2f : %.4f", 10, 0
+
+   section .text
+   global main
+
+   main:
+       push rbp
+       mov rbp, rsp
+
+       movsd xmm1, [rayon]
+       mulsd xmm1, xmm1            ; r * r
+       mulsd xmm1, [pi]            ; aire = pi * r * r   (2e flottant)
+       movsd xmm0, [rayon]         ; 1er flottant : le rayon
+
+       lea rdi, [format]           ; 1er argument entier
+       mov eax, 2                  ; 2 registres xmm utilisés
+       call printf wrt ..plt
+
+       xor eax, eax
+       pop rbp
+       ret
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de cercle.asm =====
+
+   nasm -f elf64 cercle.asm -o cercle.o && gcc cercle.o -o cercle
+   ./cercle                -> Aire d'un cercle de rayon 2.50 : 19.6350
+
+Dans un noyau, on évite les flottants : il faudrait sauvegarder les
+registres xmm à chaque interruption (d'où -mgeneral-regs-only en C).
+
+
+================================================================================
+ 16. DÉBOGUER UN PROGRAMME EN ASSEMBLEUR
+================================================================================
+
+16.1 gdb
+--------
+Assemble avec -g -F dwarf, puis :
+   gdb ./prog
+
+Configuration conseillée, dans ~/.gdbinit :
+   set disassembly-flavor intel
+
+Commandes essentielles :
+   starti                 lance le programme et s'arrête sur la 1re instruction
+   break _start           point d'arrêt sur une étiquette
+   break *0x401000        point d'arrêt sur une adresse
+   run / continue         lancer / reprendre
+   stepi (si)             exécute UNE instruction (entre dans les call)
+   nexti (ni)             exécute une instruction (passe par-dessus les call)
+   finish                 continue jusqu'au ret de la fonction en cours
+   layout asm             affiche le code désassemblé en permanence
+   layout regs            affiche les registres ET le code
+   info registers         tous les registres       (i r rax rbx : certains)
+   p $rax                 valeur de rax en décimal
+   p/x $rax               en hexadécimal           (p/t : en binaire)
+   p $eflags              drapeaux sous forme lisible [ ZF CF ... ]
+   x/s $rsi               la chaîne à l'adresse rsi
+   x/16xb $rsi            16 octets en hexa à l'adresse rsi
+   x/4xg $rsp             4 qword en hexa au sommet de la pile
+   x/10i $rip             les 10 prochaines instructions
+   display/i $pc          affiche l'instruction courante à chaque pas
+   backtrace (bt)         la pile d'appels
+   watch *(long*)0x402000 s'arrête quand cette mémoire change
+   quit                   quitter
+
+Méthode : starti, layout regs, puis si en boucle (Entrée répète la dernière
+commande). Regarde chaque registre changer et vérifie qu'il fait ce que tu
+avais prévu.
+
+16.2 Les autres outils
+----------------------
+   objdump -d -M intel prog        désassemble le programme
+   objdump -s -j .data prog        contenu brut de la section .data
+   nm prog                         liste les symboles et leurs adresses
+   readelf -a prog                 tout sur le fichier ELF
+   strace ./prog                   affiche chaque appel système :
+                                   write(1, "Bonjour tout le monde !\n", 24) = 24
+                                   exit(0)                          = ?
+   hexdump -C fichier              octets d'un fichier en hexa
+
+16.3 Les plantages et leur cause habituelle
+-------------------------------------------
+   Segmentation fault      accès mémoire interdit : adresse invalide (oubli
+                           de lea, crochets en trop), écriture en .rodata,
+                           pile déséquilibrée (ret vers une mauvaise adresse),
+                           oubli d'exit à la fin de _start
+   Floating point          div ou idiv : division par 0, ou rdx non préparé
+   exception               (quotient trop grand)
+   Illegal instruction     instruction non supportée par le processeur, ou
+                           exécution de données (saut au mauvais endroit)
+   Bus error               rare sous Linux x86 : accès à un fichier projeté
+                           en mémoire au-delà de sa fin
+
+
+EXERCICES DU CHAPITRE 16
+------------------------
+16.1 Lance fonctions.asm (10.4) dans gdb, mets un point d'arrêt dans
+     factorielle et observe la pile avec x/8xg $rsp à chaque appel récursif.
+     Retrouve les adresses de retour et les valeurs de n sauvegardées.
+16.2 Introduis volontairement un push sans pop dans une fonction et observe
+     avec gdb où le ret repart.
+
+
+================================================================================
+ 17. L'ASSEMBLEUR SANS SYSTÈME D'EXPLOITATION
+================================================================================
+
+Jusqu'ici, Linux faisait beaucoup de travail invisible : il avait déjà mis le
+processeur en mode 64 bits, préparé la mémoire virtuelle, la pile, et il
+gérait l'écran et le clavier. Dans ce chapitre, on part d'un ordinateur qui
+vient de s'allumer, et on fait tout nous-mêmes, jusqu'à un mini noyau 64 bits
+qui affiche le processeur et la RAM de la machine, et qui lit le clavier en
+AZERTY. C'est ce que fait le début de tout système d'exploitation.
+
+On teste avec QEMU, une machine virtuelle : aucun risque pour ton PC.
+
+
+17.1 Ce qui se passe à l'allumage (démarrage BIOS)
+--------------------------------------------------
+   1. Le processeur démarre en MODE RÉEL 16 bits, comme un 8086 de 1978.
+   2. Le BIOS (programme en mémoire morte de la carte mère) teste le matériel.
+   3. Il lit le PREMIER SECTEUR (512 octets) du disque de démarrage.
+   4. Si les deux derniers octets valent 0x55 puis 0xAA, le secteur est
+      déclaré "amorçable" : le BIOS le copie à l'adresse 0x7C00 et y saute,
+      avec dans dl le numéro du disque (0x80 = premier disque dur).
+   5. À partir de là, c'est ton code qui commande.
+
+Les PC récents utilisent UEFI, un système de démarrage différent (le
+firmware lance directement un programme .efi en 64 bits). La plupart gardent
+un mode de compatibilité BIOS ("Legacy" ou "CSM" dans les réglages), et QEMU
+démarre en mode BIOS par défaut. Le démarrage BIOS reste la meilleure façon
+d'apprendre, car on voit chaque étape.
+
+
+17.2 Le mode réel
+-----------------
+   - Registres de 16 bits, adresses sur 20 bits : 1 Mo de mémoire accessible.
+   - Une adresse s'écrit SEGMENT:DÉCALAGE, et vaut segment * 16 + décalage.
+        0x07C0:0x0000 = 0x7C00        0x0000:0x7C00 = 0x7C00 (même endroit)
+        0xB800:0x0000 = 0xB8000       (la mémoire de l'écran texte)
+   - Les registres de segment (cs, ds, es, ss) choisissent le segment :
+        mov al, [bx]         utilise ds:bx
+        push / pop           utilisent ss:sp
+        lodsb                lit en ds:si       stosb écrit en es:di
+   - Le BIOS offre des services par INTERRUPTIONS LOGICIELLES :
+        int 0x10   écran          int 0x13   disque
+        int 0x15   divers (RAM)   int 0x16   clavier
+     Ces services disparaissent dès qu'on quitte le mode réel.
+
+Carte de la mémoire basse d'un PC :
+   0x00000 - 0x003FF   table des vecteurs d'interruption du mode réel
+   0x00400 - 0x004FF   zone de données du BIOS
+   0x00500 - 0x07BFF   libre (environ 30 Ko)
+   0x07C00 - 0x07DFF   notre secteur d'amorçage
+   0x07E00 - 0x7FFFF   libre (environ 480 Ko)
+   0x80000 - 0x9FFFF   en partie réservé (EBDA, taille variable)
+   0xA0000 - 0xBFFFF   mémoire vidéo (0xB8000 : texte couleur)
+   0xC0000 - 0xFFFFF   BIOS et ROM des cartes
+
+
+17.3 Premier secteur d'amorçage
+-------------------------------
+   ; ===== fichier secteur.asm =====
+   ; Secteur d'amorçage minimal : affiche un message avec le BIOS.
+   bits 16
+   org 0x7C00                  ; le BIOS nous charge à 0x7C00 : toutes les
+                               ; adresses sont calculées à partir de là
+
+   debut:
+       cli
+       xor ax, ax
+       mov ds, ax              ; ds = 0 : ds:adresse = adresse
+       mov ss, ax
+       mov sp, 0x7C00          ; pile juste sous notre code (elle descend)
+       sti
+       cld                     ; lodsb avancera vers les adresses hautes
+
+       mov si, message
+   .boucle:
+       lodsb                   ; al = [ds:si], si++
+       test al, al
+       jz .fin
+       mov ah, 0x0E            ; service BIOS "afficher un caractère"
+       xor bh, bh              ; page d'écran 0
+       int 0x10
+       jmp .boucle
+
+   .fin:
+       cli
+       hlt                     ; arrête le processeur
+       jmp .fin                ; (au cas où il serait réveillé)
+
+   message: db "Bonjour depuis le secteur d'amorcage !", 13, 10, 0
+
+       times 510 - ($ - $$) db 0   ; remplir jusqu'à 510 octets
+       dw 0xAA55                   ; signature : octets 0x55 puis 0xAA
+   ; ===== fin de secteur.asm =====
+
+   nasm -f bin secteur.asm -o secteur.bin
+   qemu-system-x86_64 -drive format=raw,file=secteur.bin
+
+-f bin produit des octets bruts, sans format de fichier : exactement ce que
+le BIOS lira sur le disque. Le fichier fait 512 octets.
+
+dw 0xAA55 écrit 0x55 puis 0xAA (little-endian) : c'est bien l'ordre attendu.
+
+N'utilise PAS d'accents dans les textes du mode réel ou de l'écran VGA : la
+carte vidéo utilise l'encodage "page de code 437", pas l'UTF-8. Un "é" UTF-8
+(deux octets) donnerait deux caractères bizarres. (En CP437, é = 0x82.)
+
+
+17.4 Charger la suite depuis le disque
+--------------------------------------
+512 octets, c'est trop peu pour un noyau. Le secteur d'amorçage sert donc à
+charger les secteurs suivants en mémoire, avec le service 0x02 de int 0x13 :
+
+   mov ah, 0x02                ; lire des secteurs
+   mov al, NB_SECTEURS         ; combien
+   mov ch, 0                   ; cylindre 0
+   mov cl, 2                   ; à partir du secteur 2 (numérotés depuis 1 !)
+   mov dh, 0                   ; tête 0
+   mov dl, [lecteur]           ; disque donné par le BIOS au démarrage
+   mov bx, 0x7E00              ; destination es:bx (es = 0)
+   int 0x13
+   jc erreur_disque            ; CF = 1 : échec
+
+Cette adressage "CHS" (cylindre, tête, secteur) est limité. Pour lire loin
+sur le disque, on utilise le service 0x42 (adressage LBA, par numéro de
+secteur).
+
+Astuce utilisée dans le mini noyau : on charge la suite à 0x7E00, juste
+après le secteur d'amorçage. Ainsi un seul fichier source, avec org 0x7C00,
+contient les deux étapes, et toutes les adresses restent justes.
+
+
+17.5 Détecter la RAM : int 0x15, service 0xE820
+-----------------------------------------------
+Seul le BIOS sait où se trouve la mémoire utilisable. Il faut lui demander
+EN MODE RÉEL, avant de passer en mode protégé. Chaque appel renvoie une zone
+de 24 octets :
+   qword   adresse de début
+   qword   longueur
+   dword   type (1 = utilisable, 2 = réservée, 3 = ACPI récupérable...)
+   dword   attributs étendus
+
+   detecter_memoire:
+       mov di, 0x504           ; les zones seront rangées à partir de 0x504
+       xor ebx, ebx            ; ebx = 0 : première zone
+       xor bp, bp              ; bp = nombre de zones
+   .suivante:
+       mov eax, 0xE820
+       mov edx, 0x534D4150     ; "SMAP" : signature exigée
+       mov ecx, 24             ; taille du tampon
+       mov dword [es:di + 20], 1
+       int 0x15
+       jc .fin                 ; CF = 1 : fin de liste ou non supporté
+       cmp eax, 0x534D4150     ; le BIOS doit renvoyer "SMAP"
+       jne .fin
+       inc bp
+       add di, 24
+       test ebx, ebx           ; ebx = 0 : c'était la dernière zone
+       jz .fin
+       cmp bp, 20              ; au plus 20 zones
+       jb .suivante
+   .fin:
+       mov [0x500], bp         ; nombre de zones rangé à 0x500
+       ret
+
+Une fois en 64 bits, on additionnera les longueurs des zones de type 1.
+
+
+17.6 La ligne A20
+-----------------
+Pour rester compatibles avec le 8086, les PC bloquaient le bit 20 des
+adresses (au-delà de 1 Mo, les adresses "rebouclaient"). Il faut le libérer.
+La méthode rapide (port 0x92), supportée par presque tous les PC et QEMU :
+
+   in al, 0x92
+   or al, 2                    ; bit 1 : active A20
+   and al, 0xFE                ; bit 0 : NE PAS le mettre (redémarrage !)
+   out 0x92, al
+
+in et out lisent et écrivent sur les PORTS D'ENTRÉE-SORTIE : un espace
+d'adresses séparé (0 à 0xFFFF) où se trouvent les registres du matériel
+(clavier, contrôleur d'interruptions, curseur de l'écran...).
+
+
+17.7 La GDT et le mode protégé 32 bits
+--------------------------------------
+En mode protégé, les registres de segment ne contiennent plus un segment
+mais un SÉLECTEUR : le numéro (multiplié par 8) d'une entrée dans la GDT
+(Global Descriptor Table). Chaque entrée de 8 octets décrit un segment :
+adresse de base, limite, droits.
+
+On utilise le MODÈLE PLAT : base 0, limite 4 Go, pour le code et pour les
+données. La segmentation ne gêne alors plus rien.
+
+   gdt32:
+       dq 0                        ; entrée 0 : obligatoirement nulle
+       ; entrée 1 (sélecteur 0x08) : code
+       dw 0xFFFF                   ; limite, 16 bits bas
+       dw 0                        ; base, 16 bits bas
+       db 0                        ; base, 8 bits suivants
+       db 0x9A                     ; accès : présent, anneau 0, code, lisible
+       db 0xCF                     ; drapeaux 0xC (granularité 4 Ko, 32 bits)
+                                   ; + limite, 4 bits hauts (0xF)
+       db 0                        ; base, 8 bits hauts
+       ; entrée 2 (sélecteur 0x10) : données
+       dw 0xFFFF, 0
+       db 0, 0x92, 0xCF, 0         ; accès 0x92 : présent, données, écriture
+   gdt32_fin:
+
+   gdt32_desc:                     ; ce que lit lgdt :
+       dw gdt32_fin - gdt32 - 1    ; taille - 1
+       dd gdt32                    ; adresse
+
+Le passage en mode protégé :
+   cli                             ; plus d'interruptions BIOS
+   lgdt [gdt32_desc]               ; charge la GDT
+   mov eax, cr0
+   or eax, 1                       ; bit 0 de cr0 : PE (Protection Enable)
+   mov cr0, eax
+   jmp 0x08:mode_protege           ; SAUT LOINTAIN : charge cs = 0x08
+
+   bits 32
+   mode_protege:
+   mov ax, 0x10                    ; sélecteur des données
+   mov ds, ax
+   mov es, ax
+   mov ss, ax
+   ...
+
+Le saut lointain (far jump) est indispensable : c'est la seule façon de
+recharger cs, et donc de passer réellement en code 32 bits.
+
+Dès maintenant, int 0x10 n'existe plus. Pour afficher, on écrit
+directement dans la mémoire vidéo (17.10).
+
+
+17.8 CPUID : interroger le processeur
+-------------------------------------
+L'instruction cpuid donne des informations selon la valeur de eax, et
+renvoie ses réponses dans eax, ebx, ecx, edx.
+
+   eax = 0            ebx, edx, ecx : fabricant, 12 caractères
+                      ("GenuineIntel", "AuthenticAMD")
+   eax = 0x80000000   eax = plus grande fonction "étendue" disponible
+   eax = 0x80000001   edx bit 29 : le processeur supporte le mode long
+   eax = 0x80000002   eax, ebx, ecx, edx : 16 premiers caractères du nom
+   à 0x80000004       commercial du processeur (48 en tout)
+
+   ; lire le fabricant dans un tampon de 13 octets
+   xor eax, eax
+   cpuid
+   mov [fabricant], ebx
+   mov [fabricant + 4], edx        ; attention à l'ordre : ebx, EDX, ecx
+   mov [fabricant + 8], ecx
+   mov byte [fabricant + 12], 0
+
+   ; le mode long est-il disponible ?
+   mov eax, 0x80000000
+   cpuid
+   cmp eax, 0x80000001
+   jb pas_de_mode_long
+   mov eax, 0x80000001
+   cpuid
+   test edx, 1 << 29
+   jz pas_de_mode_long
+
+
+17.9 La pagination et le passage en mode long 64 bits
+-----------------------------------------------------
+Le mode long exige la PAGINATION : chaque adresse utilisée par le code est
+une adresse VIRTUELLE, traduite en adresse physique par des tables. En
+64 bits, la traduction passe par 4 niveaux :
+
+   adresse virtuelle (48 bits utiles)
+   | PML4 : 9 bits | PDPT : 9 bits | PD : 9 bits | PT : 9 bits | 12 bits |
+        |               |              |             |            |
+     index dans      index dans     index dans    index dans   décalage
+     la PML4         la PDPT        le PD         la PT        dans la page
+
+Chaque table fait 4096 octets : 512 entrées de 8 octets. Une entrée contient
+l'adresse physique de la table suivante (ou de la page), et des drapeaux dans
+ses bits bas :
+   bit 0   P   présente
+   bit 1   RW  écriture autorisée
+   bit 2   US  accessible au mode utilisateur
+   bit 7   PS  (dans un PD) grande page de 2 Mo : pas de PT en dessous
+
+Le plus simple : une PML4, une PDPT, un PD, et une seule GRANDE PAGE de 2 Mo
+qui traduit les adresses 0 à 2 Mo vers elles-mêmes (identity mapping). Notre
+code, la pile, la mémoire vidéo : tout est sous 2 Mo, donc rien ne bouge.
+
+   ; tables à 0x1000 (PML4), 0x2000 (PDPT), 0x3000 (PD)
+   mov edi, 0x1000
+   xor eax, eax
+   mov ecx, 3 * 4096 / 4
+   rep stosd                           ; tables remises à zéro
+   mov dword [0x1000], 0x2000 | 0b11   ; PML4[0] -> PDPT, présente, RW
+   mov dword [0x2000], 0x3000 | 0b11   ; PDPT[0] -> PD
+   mov dword [0x3000], 0x0000 | 0x83   ; PD[0] = page de 2 Mo à l'adresse 0
+                                       ; 0x83 = PS | RW | P
+
+Puis la séquence d'activation, dans cet ordre :
+   mov eax, 0x1000
+   mov cr3, eax                ; cr3 = adresse de la PML4
+   mov eax, cr4
+   or eax, 1 << 5              ; cr4.PAE : pagination étendue, requise
+   mov cr4, eax
+   mov ecx, 0xC0000080         ; MSR EFER
+   rdmsr                       ; edx:eax = valeur du MSR numéro ecx
+   or eax, 1 << 8              ; EFER.LME : Long Mode Enable
+   wrmsr
+   mov eax, cr0
+   or eax, 1 << 31             ; cr0.PG : active la pagination
+   mov cr0, eax                ; => le mode long est actif (en mode
+                               ;    "compatibilité" tant que cs est 32 bits)
+   lgdt [gdt64_desc]           ; GDT avec un segment de code 64 bits
+   jmp 0x08:mode_long          ; saut lointain : cs 64 bits
+
+   bits 64
+   mode_long:
+   ...
+
+La GDT 64 bits ne diffère que par le segment de code : drapeaux 0x20 (bit L,
+"long mode") au lieu de 0xC.
+   gdt64:
+       dq 0
+       dw 0, 0
+       db 0, 0x9A, 0x20, 0         ; code 64 bits (sélecteur 0x08)
+       dw 0, 0
+       db 0, 0x92, 0x00, 0         ; données (sélecteur 0x10)
+   gdt64_fin:
+
+
+17.10 L'écran en mode texte VGA
+-------------------------------
+La mémoire 0xB8000 contient l'écran texte : 80 colonnes, 25 lignes, soit
+2000 cases de 2 octets chacune :
+   octet 1 : le caractère (CP437)
+   octet 2 : la couleur : 4 bits de fond (haut), 4 bits de texte (bas)
+
+   Couleurs : 0 noir     1 bleu      2 vert      3 cyan
+              4 rouge    5 magenta   6 marron    7 gris clair
+              8 gris     9 bleu clair A vert clair B cyan clair
+              C rouge cl D magenta cl E jaune     F blanc
+
+   Case numéro = ligne * 80 + colonne     adresse = 0xB8000 + case * 2
+
+   mov word [0xB8000], 0x0F41      ; 'A' blanc sur noir en haut à gauche
+                                   ; (little-endian : 41 puis 0F)
+
+Pour un vrai terminal, il faut : un curseur logiciel (position de la
+prochaine case), le retour à la ligne, le défilement quand on arrive en bas
+(recopier les lignes 1 à 24 sur les lignes 0 à 23 avec rep movsw, puis
+effacer la dernière), et le déplacement du curseur clignotant matériel par
+les ports 0x3D4 (numéro de registre) et 0x3D5 (valeur) :
+   registre 0x0F : octet bas de la position    0x0E : octet haut
+
+Tout cela est dans le listing du 17.13 (fonction afficher_car).
+
+
+17.11 Le clavier PS/2 par scrutation
+------------------------------------
+Le contrôleur clavier (8042) utilise deux ports :
+   0x64   en lecture : état. Bit 0 = 1 : un octet attend d'être lu.
+   0x60   en lecture : l'octet envoyé par le clavier.
+
+Scruter ("polling") = demander en boucle s'il y a quelque chose :
+   attendre_touche:
+       in al, 0x64
+       test al, 1
+       jz attendre_touche      ; rien : on redemande
+       in al, 0x60             ; al = scancode
+
+Le clavier n'envoie pas des caractères mais des SCANCODES : le numéro de la
+TOUCHE PHYSIQUE. Jeu 1 (celui que donne le contrôleur par défaut) :
+   - appui ("make") : un code de 0x01 à 0x58, par exemple 0x10 pour la touche
+     située à gauche de la rangée du haut ;
+   - relâchement ("break") : le même code + 0x80 (0x90).
+
+La DISPOSITION (AZERTY, QWERTY...) n'est donc qu'une table de traduction
+écrite par le système : sur un clavier AZERTY, la touche 0x10 est "a", sur
+un QWERTY c'est "q". Extrait de la table AZERTY (sans Maj) :
+
+   0x02..0x0D   & é " ' ( - è _ ç à ) =
+   0x10..0x1B   a z e r t y u i o p ^ $
+   0x1E..0x28   q s d f g h j k l m ù
+   0x2C..0x35   w x c v b n , ; : !
+   0x0E = retour arrière   0x1C = Entrée   0x39 = espace
+   0x2A et 0x36 = Maj gauche et droite (à suivre avec une variable :
+   appui 0x2A = Maj enfoncée, relâchement 0xAA = Maj relâchée)
+
+Pour les lettres accentuées, la table contient leur code CP437 (é = 0x82,
+è = 0x8A, ç = 0x87, à = 0x85, ù = 0x97).
+
+La scrutation occupe le processeur à 100 %. Un vrai noyau utilise
+l'interruption du clavier (IRQ 1, voir 17.12) et hlt pour dormir entre deux
+touches.
+
+
+17.12 Les interruptions et l'IDT
+--------------------------------
+Une INTERRUPTION détourne le processeur vers une routine, puis le fait
+revenir où il était. Trois sources :
+   - les EXCEPTIONS du processeur (vecteurs 0 à 31) : division par zéro,
+     accès mémoire invalide...
+   - les IRQ du matériel (clavier, horloge, disque) ;
+   - les interruptions logicielles (instruction int).
+
+Exceptions à connaître :
+   0  #DE  erreur de division           13  #GP  protection générale
+   6  #UD  instruction invalide         14  #PF  défaut de page (cr2 =
+   8  #DF  double faute                            adresse fautive)
+   Les exceptions 8, 10 à 14, 17, 21 et 30 empilent en plus un code d'erreur.
+
+L'IDT (Interrupt Descriptor Table) associe à chaque vecteur (0 à 255)
+l'adresse de sa routine. En mode long, une entrée fait 16 octets :
+   dw  décalage, bits 0 à 15
+   dw  sélecteur du segment de code (0x08)
+   db  IST (0 : pile actuelle)
+   db  type : 0x8E = présente, anneau 0, porte d'interruption
+   dw  décalage, bits 16 à 31
+   dd  décalage, bits 32 à 63
+   dd  0 (réservé)
+
+On la charge avec lidt, sur le même modèle que lgdt (dw taille - 1, dq
+adresse). Une routine d'interruption se termine par iretq, qui dépile rip,
+cs, rflags, rsp et ss empilés par le processeur.
+
+Sans IDT, la moindre exception provoque une double faute, puis une triple
+faute : le PC redémarre en boucle. Le mini noyau installe donc une routine
+pour les 32 exceptions, qui affiche le numéro et arrête la machine.
+
+Pour les IRQ matérielles, il faut en plus :
+   - reprogrammer les deux contrôleurs d'interruptions 8259 (PIC), dont
+     les IRQ 0 à 15 tombent par défaut sur les vecteurs 8 à 15... déjà
+     utilisés par les exceptions ! On les déplace vers 32 à 47 ;
+   - envoyer "fin d'interruption" (out 0x20, al avec al = 0x20) à la fin de
+     chaque routine d'IRQ ;
+   - autoriser les interruptions avec sti.
+C'est l'étape suivante naturelle après ce chapitre (exercice 17.4).
+
+
+17.13 Le mini noyau complet
+---------------------------
+Un seul fichier, qui produit une image disque de 9 secteurs :
+   secteur 1 : étape 1 (mode réel), charge les secteurs 2 à 9 ;
+   secteurs 2 à 9 : étape 2 (RAM, A20, mode protégé, mode long, noyau).
+
+   ; ===== fichier mini_noyau.asm =====
+   ; Mini noyau x86-64 : du secteur d'amorçage au mode long.
+   ; Affiche fabricant, processeur et RAM, puis lit le clavier AZERTY.
+   ;
+   ;   nasm -f bin mini_noyau.asm -o mini_noyau.img
+   ;   qemu-system-x86_64 -drive format=raw,file=mini_noyau.img
+   ;
+   ; Test de l'IDT : nasm -f bin -dTEST_EXCEPTION ...  (division par zéro)
+
+   NB_SECTEURS     equ 8               ; secteurs chargés après le premier
+   VGA             equ 0xB8000
+   COLONNES        equ 80
+   LIGNES          equ 25
+   PILE            equ 0x90000
+
+   ;==========================================================================
+   ; ÉTAPE 1 : secteur d'amorçage, mode réel 16 bits
+   ;==========================================================================
+   bits 16
+   org 0x7C00
+
+   debut:
+       cli
+       xor ax, ax
+       mov ds, ax
+       mov es, ax
+       mov ss, ax
+       mov sp, 0x7C00
+       sti
+       cld
+
+       mov [lecteur], dl           ; disque de démarrage donné par le BIOS
+
+       mov si, msg_chargement
+       call afficher16
+
+       mov ah, 0x02                ; int 0x13, lire des secteurs
+       mov al, NB_SECTEURS
+       mov ch, 0
+       mov cl, 2
+       mov dh, 0
+       mov dl, [lecteur]
+       mov bx, 0x7E00
+       int 0x13
+       jc .erreur_disque
+       jmp etape2
+
+   .erreur_disque:
+       mov si, msg_erreur_disque
+       call afficher16
+   .arret:
+       cli
+       hlt
+       jmp .arret
+
+   ; afficher16 : affiche la chaîne ds:si terminée par 0 (BIOS)
+   afficher16:
+       push ax
+       push bx
+   .boucle:
+       lodsb
+       test al, al
+       jz .fin
+       mov ah, 0x0E
+       xor bh, bh
+       int 0x10
+       jmp .boucle
+   .fin:
+       pop bx
+       pop ax
+       ret
+
+   lecteur:            db 0
+   msg_chargement:     db "Chargement du noyau...", 13, 10, 0
+   msg_erreur_disque:  db "Erreur de lecture du disque", 13, 10, 0
+
+       times 510 - ($ - $$) db 0
+       dw 0xAA55
+
+   ;==========================================================================
+   ; ÉTAPE 2 : chargée à 0x7E00, toujours en mode réel
+   ;==========================================================================
+   etape2:
+       call detecter_memoire
+
+       ; --- ligne A20 ---
+       in al, 0x92
+       or al, 2
+       and al, 0xFE
+       out 0x92, al
+
+       ; --- mode protégé ---
+       cli
+       lgdt [gdt32_desc]
+       mov eax, cr0
+       or eax, 1
+       mov cr0, eax
+       jmp 0x08:mode_protege
+
+   ; detecter_memoire : zones E820 rangées à 0x504, leur nombre à 0x500
+   detecter_memoire:
+       mov di, 0x504
+       xor ebx, ebx
+       xor bp, bp
+   .suivante:
+       mov eax, 0xE820
+       mov edx, 0x534D4150
+       mov ecx, 24
+       mov dword [es:di + 20], 1
+       int 0x15
+       jc .fin
+       cmp eax, 0x534D4150
+       jne .fin
+       inc bp
+       add di, 24
+       test ebx, ebx
+       jz .fin
+       cmp bp, 20
+       jb .suivante
+   .fin:
+       mov [0x500], bp
+       ret
+
+   ;--------------------------------------------------------------------------
+   ; Mode protégé 32 bits
+   ;--------------------------------------------------------------------------
+   bits 32
+   mode_protege:
+       mov ax, 0x10
+       mov ds, ax
+       mov es, ax
+       mov fs, ax
+       mov gs, ax
+       mov ss, ax
+       mov esp, PILE
+
+       ; --- le mode long est-il supporté ? ---
+       mov eax, 0x80000000
+       cpuid
+       cmp eax, 0x80000001
+       jb .pas_de_mode_long
+       mov eax, 0x80000001
+       cpuid
+       test edx, 1 << 29
+       jz .pas_de_mode_long
+
+       ; --- tables de pages : 0 à 2 Mo traduits vers eux-mêmes ---
+       mov edi, 0x1000
+       xor eax, eax
+       mov ecx, 3 * 4096 / 4
+       rep stosd
+       mov dword [0x1000], 0x2000 | 0b11   ; PML4[0] -> PDPT
+       mov dword [0x2000], 0x3000 | 0b11   ; PDPT[0] -> PD
+       mov dword [0x3000], 0x0000 | 0x83   ; PD[0] = grande page de 2 Mo
+
+       ; --- activation du mode long ---
+       mov eax, 0x1000
+       mov cr3, eax
+       mov eax, cr4
+       or eax, 1 << 5                      ; PAE
+       mov cr4, eax
+       mov ecx, 0xC0000080                 ; EFER
+       rdmsr
+       or eax, 1 << 8                      ; LME
+       wrmsr
+       mov eax, cr0
+       or eax, 1 << 31                     ; PG
+       mov cr0, eax
+
+       lgdt [gdt64_desc]
+       jmp 0x08:mode_long
+
+   .pas_de_mode_long:
+       mov esi, msg_pas_64
+       mov edi, VGA
+       mov ah, 0x4F                        ; blanc sur rouge
+   .copie:
+       lodsb
+       test al, al
+       jz .arret
+       stosw
+       jmp .copie
+   .arret:
+       hlt
+       jmp .arret
+
+   ;--------------------------------------------------------------------------
+   ; Mode long 64 bits : le noyau
+   ;--------------------------------------------------------------------------
+   bits 64
+   mode_long:
+       mov ax, 0x10
+       mov ds, ax
+       mov es, ax
+       mov fs, ax
+       mov gs, ax
+       mov ss, ax
+       mov rsp, PILE
+       cld
+
+       call installer_idt
+       call effacer_ecran
+
+       mov byte [couleur], 0x0B            ; cyan clair
+       mov rsi, msg_titre
+       call afficher_texte
+       mov byte [couleur], 0x07            ; gris clair
+
+       ; --- fabricant du processeur ---
+       mov rsi, msg_fabricant
+       call afficher_texte
+       xor eax, eax
+       cpuid
+       mov [fabricant], ebx
+       mov [fabricant + 4], edx
+       mov [fabricant + 8], ecx
+       mov rsi, fabricant
+       call afficher_texte
+       mov al, 10
+       call afficher_car
+
+       ; --- nom commercial du processeur ---
+       mov rsi, msg_processeur
+       call afficher_texte
+       call afficher_nom_processeur
+       mov al, 10
+       call afficher_car
+
+       ; --- RAM utilisable ---
+       mov rsi, msg_ram
+       call afficher_texte
+       call calculer_ram                   ; rax = octets utilisables
+       shr rax, 20                         ; en Mo
+       call afficher_nombre
+       mov rsi, msg_mo
+       call afficher_texte
+
+   %ifdef TEST_EXCEPTION
+       xor ecx, ecx
+       div ecx                             ; division par zéro : exception 0
+   %endif
+
+       mov rsi, msg_clavier
+       call afficher_texte
+
+   ; --- boucle principale : lecture du clavier par scrutation ---
+   boucle_clavier:
+       in al, 0x64
+       test al, 1
+       jz .attendre                        ; rien à lire
+       in al, 0x60                         ; al = scancode
+       test al, 0x80
+       jnz boucle_clavier                  ; relâchement : ignoré
+       movzx eax, al
+       cmp eax, TAILLE_TABLE
+       jae boucle_clavier                  ; touche hors table
+       mov al, [table_azerty + rax]        ; scancode -> caractère
+       test al, al
+       jz boucle_clavier                   ; touche sans caractère
+       call afficher_car
+       cmp al, 10
+       jne boucle_clavier
+       mov rsi, msg_invite                 ; après Entrée : nouvelle invite
+       call afficher_texte
+       jmp boucle_clavier
+   .attendre:
+       pause                               ; indique une attente active
+       jmp boucle_clavier
+
+   ;--------------------------------------------------------------------------
+   ; Écran VGA
+   ;--------------------------------------------------------------------------
+
+   ; effacer_ecran : remplit l'écran d'espaces et remet le curseur à 0
+   effacer_ecran:
+       push rax
+       push rcx
+       push rdi
+       mov rdi, VGA
+       mov ax, 0x0720                      ; espace, gris sur noir
+       mov ecx, COLONNES * LIGNES
+       rep stosw
+       mov qword [curseur], 0
+       call placer_curseur
+       pop rdi
+       pop rcx
+       pop rax
+       ret
+
+   ; afficher_car : affiche al (gère 10 = retour à la ligne, 8 = effacement)
+   ; conserve tous les registres
+   afficher_car:
+       push rax
+       push rbx
+       push rcx
+       push rdx
+       push rsi
+       push rdi
+       mov rbx, [curseur]
+       cmp al, 10
+       je .nouvelle_ligne
+       cmp al, 8
+       je .effacement
+       mov ah, [couleur]
+       mov [VGA + rbx*2], ax               ; caractère + couleur
+       inc rbx
+       jmp .verifier
+   .nouvelle_ligne:
+       mov rax, rbx
+       xor edx, edx
+       mov ecx, COLONNES
+       div rcx                             ; rax = ligne actuelle
+       inc rax
+       imul rbx, rax, COLONNES             ; début de la ligne suivante
+       jmp .verifier
+   .effacement:
+       test rbx, rbx
+       jz .fin                             ; déjà tout en haut à gauche
+       dec rbx
+       mov word [VGA + rbx*2], 0x0720
+       jmp .ranger
+   .verifier:
+       cmp rbx, COLONNES * LIGNES
+       jb .ranger
+       ; défilement : les lignes 1 à 24 remontent d'une ligne
+       mov rsi, VGA + COLONNES * 2
+       mov rdi, VGA
+       mov ecx, COLONNES * (LIGNES - 1)
+       rep movsw
+       mov ax, 0x0720                      ; rdi est au début de la
+       mov ecx, COLONNES                   ; dernière ligne : on l'efface
+       rep stosw
+       sub rbx, COLONNES
+   .ranger:
+       mov [curseur], rbx
+       call placer_curseur
+   .fin:
+       pop rdi
+       pop rsi
+       pop rdx
+       pop rcx
+       pop rbx
+       pop rax
+       ret
+
+   ; placer_curseur : déplace le curseur matériel à la position [curseur]
+   placer_curseur:
+       push rax
+       push rbx
+       push rdx
+       mov rbx, [curseur]
+       mov dx, 0x3D4
+       mov al, 0x0F                        ; registre : octet bas
+       out dx, al
+       inc dx
+       mov al, bl
+       out dx, al
+       dec dx
+       mov al, 0x0E                        ; registre : octet haut
+       out dx, al
+       inc dx
+       mov al, bh
+       out dx, al
+       pop rdx
+       pop rbx
+       pop rax
+       ret
+
+   ; afficher_texte : affiche la chaîne rsi terminée par 0
+   afficher_texte:
+       push rax
+       push rsi
+   .boucle:
+       lodsb
+       test al, al
+       jz .fin
+       call afficher_car
+       jmp .boucle
+   .fin:
+       pop rsi
+       pop rax
+       ret
+
+   ; afficher_nombre : affiche rax en décimal
+   afficher_nombre:
+       push rax
+       push rcx
+       push rdx
+       push rsi
+       sub rsp, 24
+       lea rsi, [rsp + 24]
+       dec rsi
+       mov byte [rsi], 0                   ; fin de chaîne
+       mov ecx, 10
+   .chiffre:
+       xor edx, edx
+       div rcx
+       add dl, '0'
+       dec rsi
+       mov [rsi], dl
+       test rax, rax
+       jnz .chiffre
+       call afficher_texte
+       add rsp, 24
+       pop rsi
+       pop rdx
+       pop rcx
+       pop rax
+       ret
+
+   ;--------------------------------------------------------------------------
+   ; Informations sur la machine
+   ;--------------------------------------------------------------------------
+
+   ; afficher_nom_processeur : CPUID 0x80000002 à 0x80000004
+   afficher_nom_processeur:
+       push rsi
+       push rdi
+       mov eax, 0x80000000
+       cpuid
+       cmp eax, 0x80000004
+       jb .inconnu
+       mov rdi, nom_processeur
+       mov esi, 0x80000002
+   .partie:
+       mov eax, esi
+       cpuid
+       mov [rdi], eax
+       mov [rdi + 4], ebx
+       mov [rdi + 8], ecx
+       mov [rdi + 12], edx
+       add rdi, 16
+       inc esi
+       cmp esi, 0x80000004
+       jbe .partie
+       mov rsi, nom_processeur
+   .espaces:                               ; certains noms commencent par
+       cmp byte [rsi], ' '                 ; des espaces : on les saute
+       jne .afficher
+       inc rsi
+       jmp .espaces
+   .inconnu:
+       mov rsi, msg_inconnu
+   .afficher:
+       call afficher_texte
+       pop rdi
+       pop rsi
+       ret
+
+   ; calculer_ram : rax = somme des zones E820 de type 1 (utilisables)
+   calculer_ram:
+       push rcx
+       push rsi
+       movzx ecx, word [0x500]             ; nombre de zones
+       mov rsi, 0x504
+       xor eax, eax
+   .zone:
+       test ecx, ecx
+       jz .fin
+       cmp dword [rsi + 16], 1             ; type 1 ?
+       jne .suivante
+       add rax, [rsi + 8]                  ; + longueur
+   .suivante:
+       add rsi, 24
+       dec ecx
+       jmp .zone
+   .fin:
+       pop rsi
+       pop rcx
+       ret
+
+   ;--------------------------------------------------------------------------
+   ; IDT : une routine pour chacune des 32 exceptions
+   ;--------------------------------------------------------------------------
+   installer_idt:
+       push rax
+       push rcx
+       push rsi
+       push rdi
+       mov rdi, idt
+       mov rsi, adresses_exceptions
+       xor ecx, ecx
+   .entree:
+       mov rax, [rsi + rcx*8]              ; adresse de la routine n° rcx
+       mov [rdi], ax                       ; bits 0 à 15
+       mov word [rdi + 2], 0x08            ; segment de code
+       mov byte [rdi + 4], 0               ; IST
+       mov byte [rdi + 5], 0x8E            ; porte d'interruption, anneau 0
+       shr rax, 16
+       mov [rdi + 6], ax                   ; bits 16 à 31
+       shr rax, 16
+       mov [rdi + 8], eax                  ; bits 32 à 63
+       mov dword [rdi + 12], 0
+       add rdi, 16
+       inc ecx
+       cmp ecx, 32
+       jb .entree
+       lidt [idt_desc]
+       pop rdi
+       pop rsi
+       pop rcx
+       pop rax
+       ret
+
+   ; 32 petites routines générées par le préprocesseur : chacune empile son
+   ; numéro puis saute à la routine commune.
+   %assign n 0
+   %rep 32
+   exception_%[n]:
+       push n
+       jmp exception_commune
+   %assign n n + 1
+   %endrep
+
+   exception_commune:
+       mov byte [couleur], 0x4F            ; blanc sur rouge
+       mov al, 10
+       call afficher_car
+       mov rsi, msg_exception
+       call afficher_texte
+       mov rax, [rsp]                      ; numéro empilé par la routine
+       call afficher_nombre
+       mov rsi, msg_arret
+       call afficher_texte
+       cli
+   .arret:
+       hlt
+       jmp .arret
+
+   ;--------------------------------------------------------------------------
+   ; Données
+   ;--------------------------------------------------------------------------
+   gdt32:
+       dq 0
+       dw 0xFFFF, 0
+       db 0, 0x9A, 0xCF, 0                 ; code 32 bits
+       dw 0xFFFF, 0
+       db 0, 0x92, 0xCF, 0                 ; données
+   gdt32_fin:
+   gdt32_desc:
+       dw gdt32_fin - gdt32 - 1
+       dd gdt32
+
+   gdt64:
+       dq 0
+       dw 0, 0
+       db 0, 0x9A, 0x20, 0                 ; code 64 bits
+       dw 0, 0
+       db 0, 0x92, 0x00, 0                 ; données
+   gdt64_fin:
+   gdt64_desc:
+       dw gdt64_fin - gdt64 - 1
+       dq gdt64
+
+   idt:
+       times 32 * 16 db 0
+   idt_desc:
+       dw 32 * 16 - 1
+       dq idt
+
+   adresses_exceptions:
+   %assign n 0
+   %rep 32
+       dq exception_%[n]
+   %assign n n + 1
+   %endrep
+
+   curseur:            dq 0
+   couleur:            db 0x07
+   fabricant:          times 13 db 0
+   nom_processeur:     times 49 db 0
+
+   msg_pas_64:     db "Ce processeur ne supporte pas le mode 64 bits", 0
+   msg_titre:      db "Mini noyau x86-64 - mode long actif", 10, 10, 0
+   msg_fabricant:  db "Fabricant  : ", 0
+   msg_processeur: db "Processeur : ", 0
+   msg_ram:        db "RAM        : ", 0
+   msg_mo:         db " Mo utilisables", 10, 10, 0
+   msg_inconnu:    db "inconnu", 0
+   msg_clavier:    db "Tape du texte (clavier AZERTY) :", 10
+   msg_invite:     db "> ", 0
+   msg_exception:  db "EXCEPTION ", 0
+   msg_arret:      db " : systeme arrete.", 0
+
+   ; Scancodes (jeu 1) -> caractères, disposition AZERTY, sans Maj.
+   ; 0 = pas de caractère. Accents en CP437.
+   table_azerty:
+       db 0, 0                                     ; 0x00, 0x01 Échap
+       db '&', 0x82, '"', "'", '(', '-', 0x8A, '_' ; 0x02 - 0x09
+       db 0x87, 0x85, ')', '='                     ; 0x0A - 0x0D
+       db 8, 0                                     ; 0x0E retour arr., 0x0F tab
+       db 'a', 'z', 'e', 'r', 't', 'y', 'u', 'i'   ; 0x10 - 0x17
+       db 'o', 'p', '^', '$'                       ; 0x18 - 0x1B
+       db 10, 0                                    ; 0x1C Entrée, 0x1D Ctrl
+       db 'q', 's', 'd', 'f', 'g', 'h', 'j', 'k'   ; 0x1E - 0x25
+       db 'l', 'm', 0x97, 0xFD                     ; 0x26 - 0x29 (ù, ²)
+       db 0, '*'                                   ; 0x2A Maj g., 0x2B
+       db 'w', 'x', 'c', 'v', 'b', 'n'             ; 0x2C - 0x31
+       db ',', ';', ':', '!'                       ; 0x32 - 0x35
+       db 0, '*', 0, ' '                           ; 0x36 Maj d., 0x37, 0x38
+                                                   ; Alt, 0x39 espace
+   TAILLE_TABLE    equ $ - table_azerty
+
+   ; remplissage jusqu'à la taille exacte de l'image
+       times (NB_SECTEURS + 1) * 512 - ($ - $$) db 0
+   ; ===== fin de mini_noyau.asm =====
+
+   nasm -f bin mini_noyau.asm -o mini_noyau.img
+   qemu-system-x86_64 -drive format=raw,file=mini_noyau.img
+
+Si le code grossit au point de dépasser 9 secteurs, NASM refuse d'assembler
+("TIMES value -24 is negative", par exemple) : augmente NB_SECTEURS.
+
+À l'écran (dans QEMU) :
+   Mini noyau x86-64 - mode long actif
+
+   Fabricant  : AuthenticAMD         (ou GenuineIntel selon le processeur
+   Processeur : QEMU Virtual CPU...   émulé par QEMU)
+   RAM        : 127 Mo utilisables
+
+   Tape du texte (clavier AZERTY) :
+   > _
+
+Remarque sur les données : dans une image -f bin, NASM place tout (code et
+données) à la suite, dans l'ordre du fichier. Les données sont donc
+simplement rangées après le code, et toutes les adresses sont absolues,
+calculées à partir de org 0x7C00.
+
+
+17.14 Lancer, déboguer, essayer sur une vraie machine
+-----------------------------------------------------
+Options utiles de QEMU :
+   -m 512M                  quantité de RAM (la valeur affichée change)
+   -cpu host -enable-kvm    le vrai processeur de ton PC (nom réel affiché)
+   -no-reboot -no-shutdown  s'arrête au lieu de redémarrer sur une triple
+                            faute (sinon l'écran clignote en boucle)
+   -d int,cpu_reset         affiche les interruptions et les réinitialisations
+                            (très utile pour trouver une triple faute)
+   -monitor stdio           console QEMU : "info registers", "x /10i $pc",
+                            "xp /16xb 0xb8000"...
+   -s -S                    attend gdb sur le port 1234, puis dans gdb :
+                               target remote :1234
+                               set architecture i8086   (pour le mode réel)
+                               break *0x7c00
+                               continue
+
+Sur une vraie machine (en mode BIOS/Legacy) : on écrit l'image sur une clé
+USB. ATTENTION, cela EFFACE la clé, et se tromper de périphérique efface un
+disque : vérifie trois fois le nom avec lsblk.
+   sudo dd if=mini_noyau.img of=/dev/sdX bs=512 conv=fsync
+Certains BIOS exigent en plus un "BPB" (en-tête de disquette) au début du
+secteur d'amorçage pour démarrer une clé USB : sur QEMU, ce n'est pas utile.
+
+
+EXERCICES DU CHAPITRE 17
+------------------------
+17.1 Modifie secteur.asm pour afficher le message en jaune sur bleu en
+     écrivant directement en mémoire vidéo (segment 0xB800 en mode réel).
+17.2 Ajoute au mini noyau la touche Maj : une variable maj_enfoncee mise à
+     1 par les scancodes 0x2A/0x36 et à 0 par 0xAA/0xB6, et une seconde table
+     AZERTY (chiffres, lettres majuscules...).
+17.3 Garde la ligne tapée dans un tampon. À l'appui sur Entrée, compare-la
+     avec "aide" et "effacer" (instructions de chaînes, chapitre 12) et
+     exécute la commande correspondante : c'est le début d'un interpréteur
+     de commandes.
+17.4 (Difficile) Reprogramme les PIC pour placer les IRQ sur les vecteurs 32
+     à 47, ajoute une routine pour l'IRQ 1 (vecteur 33) qui lit le port 0x60,
+     envoie la fin d'interruption, puis remplace la boucle de scrutation par
+     sti et hlt.
+
+
+================================================================================
+ 18. ANNEXES
+================================================================================
+
+18.1 Aide-mémoire des registres et de la convention d'appel
+-----------------------------------------------------------
+   Registre   Fonctions (System V)        Syscall Linux    Préservé ?
+   --------   -------------------------   --------------   ----------
+   rax        valeur de retour            numéro / retour  non
+   rbx        -                           -                OUI
+   rcx        4e argument                 écrasé           non
+   rdx        3e argument, retour haut    3e argument      non
+   rsi        2e argument                 2e argument      non
+   rdi        1er argument                1er argument     non
+   rbp        base du cadre de pile       -                OUI
+   rsp        sommet de la pile           -                OUI
+   r8         5e argument                 5e argument      non
+   r9         6e argument                 6e argument      non
+   r10        -                           4e argument      non
+   r11        -                           écrasé           non
+   r12-r15    -                           -                OUI
+   xmm0-7     arguments / retour flottant -                non
+
+   Pile alignée sur 16 au moment du call. DF = 0.
+
+18.2 Aide-mémoire des instructions
+----------------------------------
+   Données       mov  movzx  movsx  movsxd  xchg  lea  push  pop
+   Arithmétique  add  sub  adc  sbb  inc  dec  neg  mul  imul  div  idiv
+                 cqo  cdq
+   Bits          and  or  xor  not  test  shl  shr  sar  rol  ror
+                 bt  bts  btr  btc  bsf  bsr  popcnt  lzcnt  tzcnt
+   Comparaison   cmp  test  setcc  cmovcc
+   Sauts         jmp  jcc  call  ret  loop  jrcxz
+   Chaînes       movsb/w/d/q  stosb...  lodsb...  scasb...  cmpsb...
+                 rep  repe  repne  cld  std
+   Système       syscall  int  iretq  cli  sti  hlt  in  out  cpuid
+                 rdmsr  wrmsr  lgdt  lidt  pause  nop
+   Flottants     movsd  addsd  subsd  mulsd  divsd  sqrtsd  comisd
+                 cvtsi2sd  cvttsd2si  pxor
+
+18.3 Aide-mémoire de NASM
+-------------------------
+   bits 16 / 32 / 64       mode du code produit
+   org adresse             adresse de chargement (format bin)
+   default rel             adresses relatives à rip par défaut
+   section .text/.data/.rodata/.bss
+   global nom / extern nom
+   db dw dd dq             données initialisées
+   resb resw resd resq     réservations (.bss)
+   times n ...             répétition
+   equ                     constante
+   $  $$                   position actuelle / début de section
+   align n / alignb n      alignement
+   incbin "fichier"        inclure des octets
+   struc / endstruc        décalages de structure (nom_size = taille)
+   istruc / at / iend      structure initialisée
+   byte word dword qword   taille d'un accès mémoire
+   strict                  interdit à NASM de changer la taille choisie
+   %define %assign %macro %endmacro %rep %endrep %if %ifdef %include
+   nasm -f elf64 / -f bin / -g -F dwarf / -dNOM / -E / -I dossier
+
+18.4 Messages d'erreur fréquents
+--------------------------------
+NASM :
+   "operation size not specified"
+       Accès mémoire sans taille : mov [rbx], 1 -> mov qword [rbx], 1
+   "invalid combination of opcode and operands"
+       Tailles différentes (mov eax, bl), mémoire vers mémoire, constante
+       là où ce n'est pas permis (cmovl rax, 5)...
+   "symbol `xxx' not defined"
+       Étiquette mal écrite, extern oublié, ou étiquette locale utilisée
+       hors de sa fonction (8.9).
+   "cannot use high byte register in rex instruction"
+       ah/bh/ch/dh mélangé avec un registre 64 bits ou sil, r8b...
+   "invalid effective address" / "invalid 64-bit effective address"
+       Mode d'adressage impossible (6.4).
+   "TIMES value -2 is negative"
+       Le code dépasse la taille prévue (secteur d'amorçage trop gros).
+   "signed dword immediate exceeds bounds" (avertissement !)
+       Constante de plus de 32 bits vers la mémoire : valeur TRONQUÉE.
+
+ld :
+   "cannot find entry symbol _start"
+       global _start oublié (le programme démarrera n'importe où).
+   "undefined reference to `xxx'"
+       Fonction déclarée extern mais fournie par aucun fichier.
+   "missing .note.GNU-stack section implies executable stack"
+       Ajouter la section .note.GNU-stack à la fin du fichier.
+
+gcc (édition de liens) :
+   "relocation R_X86_64_32S against `.data' can not be used when making
+    a PIE object"
+       Adresse absolue ([t + rcx*8], mov rax, etiquette) : utiliser
+       default rel et lea (6.5), ou gcc -no-pie.
+   "relocation R_X86_64_PC32 against symbol `printf'..."
+       call printf -> call printf wrt ..plt (14.2).
+
+18.5 Tableau de correspondance C / assembleur
+---------------------------------------------
+   C                              Assembleur NASM
+   ----------------------------   ---------------------------------------
+   char / int8_t                  byte (1 octet), al, db
+   short / int16_t                word (2), ax, dw
+   int / int32_t                  dword (4), eax, dd
+   long / int64_t / pointeur      qword (8), rax, dq
+   double                         qword SSE, xmm0, dq 3.14
+   int x = 5;  (global)           x: dd 5          (section .data)
+   const char t[] = "a";          t: db "a", 0     (section .rodata)
+   char tampon[100]; (global)     tampon: resb 100 (section .bss)
+   variable locale                [rbp - 8] après sub rsp, n
+   x = y + z;                     mov eax, [y] / add eax, [z] / mov [x], eax
+   a / b, a % b (non signés)      xor edx, edx / div rbx -> rax, rdx
+   a / b (signés)                 cqo / idiv rbx
+   a << n, a >> n                 shl, shr (non signé), sar (signé)
+   &x                             lea rax, [x]
+   *p                             [rax]
+   p[i]  (int32_t *p)             [rax + rcx*4]
+   p->champ                       [rax + struc.champ]
+   p++   (int64_t *p)             add rax, 8
+   if (a < b)  (signés)           cmp / jge sinon
+   if (a < b)  (non signés)       cmp / jae sinon
+   while, for                     étiquette + cmp + jcc + jmp
+   switch                         table de sauts : jmp [rbx + rax*8]
+   f(a, b, c)                     rdi, rsi, rdx puis call f
+   return x;                      mov rax, x / ret
+   pointeur de fonction           call rax / call [table + i*8]
+   malloc / free                  mmap / munmap (syscalls 9 et 11)
+   printf("%d")                   afficher_nombre (11.5) ou call printf
+   exit(0)                        mov eax, 60 / xor edi, edi / syscall
+
+18.6 Bonnes pratiques
+---------------------
+   - Commente CHAQUE bloc : ce que contient chaque registre, et pourquoi.
+   - En tête de chaque fonction : ses arguments, son retour, les registres
+     qu'elle modifie.
+   - Respecte la convention d'appel, même entre tes propres fonctions : tu
+     pourras les réutiliser et les appeler depuis le C.
+   - Utilise des equ pour toutes les constantes (numéros de syscalls,
+     tailles, ports) : pas de nombres magiques.
+   - default rel partout en 64 bits.
+   - xor eax, eax pour mettre à zéro, test reg, reg pour comparer à zéro.
+   - Vérifie les retours des appels système.
+   - Teste souvent, par petits morceaux, et lance gdb au moindre doute.
+   - Lis l'assembleur produit par un compilateur C pour apprendre des
+     astuces.
+
+18.7 Pour aller plus loin
+-------------------------
+   - Le manuel de NASM : nasm.us, rubrique documentation.
+   - Intel 64 and IA-32 Architectures Software Developer's Manual : LA
+     référence de chaque instruction (volume 2) et du fonctionnement du
+     processeur : modes, pagination, interruptions (volume 3).
+   - Le document "System V Application Binary Interface, AMD64
+     Architecture Processor Supplement" : la convention d'appel en détail.
+   - wiki.osdev.org : démarrage, mode long, PIC, APIC, clavier, disques,
+     systèmes de fichiers... indispensable pour écrire un noyau.
+   - Ralf Brown's Interrupt List : tous les services BIOS (int 0x10...).
+   - "Programming from the Ground Up" de Jonathan Bartlett (gratuit en
+     ligne ; syntaxe AT&T et 32 bits, mais excellent pour les principes).
+   - godbolt.org : voir l'assembleur produit par les compilateurs.
+   - man 2 syscalls, man 2 write... : les appels système Linux.
+
+
+================================================================================
+ 19. CORRIGÉS DES EXERCICES
+================================================================================
+
+Il y a toujours plusieurs solutions correctes en assembleur. Si ton
+programme donne le bon résultat et respecte la convention d'appel, il est
+juste, même s'il diffère de celui-ci. Les programmes complets ont tous été
+assemblés et exécutés.
+
+--- 1.1 ---
+   Il suffit de changer le texte : message: db "Bonjour Camille !", 10
+   La longueur se recalcule toute seule grâce à equ $ - message.
+
+--- 1.2 ---
+   mov rax, 60
+   mov rdi, 42             ; au lieu de 0
+   syscall
+   ./bonjour ; echo $?     -> 42
+
+--- 1.3 ---
+   ; ===== fichier corr_1_3.asm =====
+   bits 64
+   default rel
+
+   section .data
+   ligne1:     db "Première ligne", 10
+   LONG1       equ $ - ligne1
+   ligne2:     db "Deuxième ligne", 10
+   LONG2       equ $ - ligne2
+
+   section .text
+   global _start
+
+   _start:
+       mov rax, 1
+       mov rdi, 1
+       lea rsi, [ligne1]
+       mov rdx, LONG1
+       syscall
+
+       mov rax, 1              ; rax contient maintenant le résultat du
+       mov rdi, 1              ; premier write : il faut tout recharger
+       lea rsi, [ligne2]
+       mov rdx, LONG2
+       syscall
+
+       mov rax, 60
+       xor edi, edi
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_1_3.asm =====
+
+--- 2.1 ---
+   200 = 128 + 64 + 8 = 0b1100_1000 = 0xC8
+   0xBEEF = 11*4096 + 14*256 + 14*16 + 15 = 45056 + 3584 + 224 + 15 = 48879
+
+--- 2.2 ---
+   42 = 0b0010_1010. Inversé : 0b1101_0101. Plus 1 : 0b1101_0110.
+   -42 sur 8 bits = 0xD6, sur 16 bits = 0xFFD6.
+
+--- 2.3 ---
+   dw 0xABCD  ->  CD AB
+   dq 1       ->  01 00 00 00 00 00 00 00
+
+--- 3.1 ---
+   Après mov al, 0xFF  : rax = 0x11223344556677FF (seul l'octet bas change).
+   Après mov eax, 0xFF : rax = 0x00000000000000FF (les 32 bits hauts sont
+   remis à zéro, règle du 3.4).
+
+--- 3.2 ---
+   0x80 - 1 = 0x7F.
+   CF = 0 : en non signé, 128 - 1 = 127 ne demande pas d'emprunt.
+   ZF = 0 : le résultat n'est pas nul.
+   SF = 0 : le bit de poids fort de 0x7F vaut 0.
+   OF = 1 : en signé, -128 - 1 = -129 ne tient pas sur 8 bits (on obtient 127).
+
+--- 3.3 ---
+   ; ===== fichier corr_3_3.asm =====
+   bits 64
+   section .text
+   global _start
+   _start:
+       mov ax, 0x1234
+       movzx edi, ah           ; edi = 0x12 = 18
+                               ; (movzx rdi, ah serait refusé : rdi exige
+                               ;  un préfixe REX, incompatible avec ah)
+       mov eax, 60
+       syscall
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_3_3.asm =====
+   echo $? -> 18
+
+--- 4.1 ---
+   section .rodata
+   valeurs:    dd 10, 20, 30, 40, 50
+   NB          equ ($ - valeurs) / 4       ; 20 octets / 4 = 5
+
+--- 4.2 ---
+   section .bss
+   tampon:     resb 1024
+   grands:     resq 16
+
+--- 4.3 ---
+   db "abc", 0    : 4 octets
+   dw 1, 2, 3     : 3 x 2 = 6 octets
+   times 3 dd 0   : 3 x 4 = 12 octets
+
+--- 5.1 ---
+   ; ===== fichier corr_5_1.asm =====
+   bits 64
+   section .text
+   global _start
+   _start:
+       mov eax, 20             ; n
+       lea rdi, [rax + 1]      ; rdi = n + 1
+       imul rdi, rax           ; rdi = n * (n + 1) = 420
+       shr rdi, 1              ; / 2 (un produit de deux entiers consécutifs
+                               ;      est toujours pair)
+       mov eax, 60
+       syscall                 ; code de sortie 210
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_5_1.asm =====
+
+--- 5.2 ---
+   ; ===== fichier corr_5_2.asm =====
+   bits 64
+   section .text
+   global _start
+   _start:
+       mov eax, 100            ; degrés Celsius
+       imul eax, eax, 9        ; 900
+       xor edx, edx
+       mov ecx, 5
+       div ecx                 ; eax = 180
+       add eax, 32             ; 212
+       mov edi, eax
+       mov eax, 60
+       syscall
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_5_2.asm =====
+   Le code de sortie ne garde que l'octet bas : 212 tient dans un octet,
+   mais 1832 = 0x728 donnerait 0x28 = 40.
+
+--- 5.3 ---
+   section .data
+   a:  dq 111
+   b:  dq 222
+
+       mov rax, [a]
+       mov rbx, [b]
+       mov [a], rbx
+       mov [b], rax
+   Variante : mov rax, [a] / xchg rax, [b] / mov [a], rax
+   (xchg avec la mémoire est correct mais lent : il verrouille le bus.)
+
+--- 6.1 ---
+   ; ===== fichier corr_6_1.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   t:      dq 7, 42, 13, 99, 5, 64
+   NB      equ ($ - t) / 8
+
+   section .text
+   global _start
+
+   _start:
+       ; --- version par indice ---
+       lea rbx, [t]
+       mov rax, [rbx]              ; max = t[0]
+       mov ecx, 1                  ; i = 1
+   .indice:
+       cmp rcx, NB
+       jae .fin_indice
+       cmp [rbx + rcx*8], rax      ; t[i] > max ?  (signé)
+       jle .suivant
+       mov rax, [rbx + rcx*8]
+   .suivant:
+       inc rcx
+       jmp .indice
+   .fin_indice:
+       mov r12, rax
+
+       ; --- version par pointeur ---
+       lea rsi, [t]
+       lea rdi, [t + NB*8]         ; fin
+       mov rax, [rsi]
+   .pointeur:
+       add rsi, 8
+       cmp rsi, rdi
+       jae .fin_pointeur
+       cmp [rsi], rax
+       jle .pointeur
+       mov rax, [rsi]
+       jmp .pointeur
+   .fin_pointeur:
+
+       cmp rax, r12                ; les deux versions doivent concorder
+       jne .erreur
+       mov rdi, rax                ; 99
+       mov eax, 60
+       syscall
+   .erreur:
+       mov edi, 255
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_6_1.asm =====
+
+--- 6.2 ---
+   ; ===== fichier corr_6_2.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   texte:  db "le chat et le chien se reposent", 0
+
+   section .text
+   global _start
+
+   _start:
+       lea rsi, [texte]
+       xor edi, edi                ; compteur
+   .boucle:
+       mov al, [rsi]
+       test al, al
+       jz .fin
+       cmp al, 'e'
+       jne .suivant
+       inc edi
+   .suivant:
+       inc rsi
+       jmp .boucle
+   .fin:
+       mov eax, 60                 ; code de sortie = 7
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_6_2.asm =====
+
+--- 6.3 ---
+   ; ===== fichier corr_6_3.asm =====
+   bits 64
+   default rel
+
+   section .data                   ; .data : on va modifier le tableau
+   t:      dd 1, 2, 3, 4, 5
+   NB      equ ($ - t) / 4
+
+   section .text
+   global _start
+
+   _start:
+       lea rsi, [t]                ; gauche = premier élément
+       lea rdi, [t + (NB - 1)*4]   ; droite = dernier élément
+   .boucle:
+       cmp rsi, rdi
+       jae .fin                    ; les pointeurs se sont croisés
+       mov eax, [rsi]              ; échange *gauche et *droite
+       mov edx, [rdi]
+       mov [rsi], edx
+       mov [rdi], eax
+       add rsi, 4
+       sub rdi, 4
+       jmp .boucle
+   .fin:
+       lea rbx, [t]
+       mov edi, [rbx]              ; t[0] = 5
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_6_3.asm =====
+
+--- 6.4 ---
+   ; ===== fichier corr_6_4.asm =====
+   bits 64
+   default rel
+
+   struc point
+       .x: resd 1
+       .y: resd 1
+   endstruc                        ; point_size = 8
+
+   section .rodata
+   points:
+       istruc point
+           at point.x, dd 1
+           at point.y, dd 2
+       iend
+       istruc point
+           at point.x, dd 3
+           at point.y, dd 4
+       iend
+       istruc point
+           at point.x, dd 5
+           at point.y, dd 6
+       iend
+   NB  equ ($ - points) / point_size
+
+   section .text
+   global _start
+
+   _start:
+       lea rbx, [points]
+       xor eax, eax
+       xor ecx, ecx
+   .boucle:
+       cmp ecx, NB
+       jae .fin
+       add eax, [rbx + rcx*point_size + point.y]   ; taille 8 : échelle
+       inc ecx                                     ; permise
+       jmp .boucle
+   .fin:
+       mov edi, eax                ; 2 + 4 + 6 = 12
+       mov eax, 60
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_6_4.asm =====
+
+--- 6.5 ---
+   Seul le début de _start change par rapport à liste.asm (6.11), plus la
+   déclaration de n4 dans .data :
+
+   n4: istruc noeud
+           at noeud.valeur,  dq 40
+           at noeud.suivant, dq 0
+       iend
+
+   _start:
+       lea rbx, [n2]
+       lea rdx, [n4]
+       mov rax, [rbx + noeud.suivant]      ; rax = n2->suivant (= n3)
+       mov [rdx + noeud.suivant], rax      ; n4->suivant = n3
+       mov [rbx + noeud.suivant], rdx      ; n2->suivant = n4
+       lea rbx, [n1]                       ; puis le parcours habituel
+       ...                                 ; code de sortie : 100
+
+   L'ORDRE des deux écritures est important : si on faisait d'abord
+   n2->suivant = n4, on perdrait l'adresse de n3.
+
+--- 7.1 ---
+   ; ===== fichier corr_7_1.asm =====
+   bits 64
+   section .text
+   global _start
+   _start:
+       mov eax, 0xF0F0
+       xor edi, edi                ; compteur de bits
+   .boucle:
+       test eax, eax
+       jz .fin                     ; plus aucun bit à 1
+       test eax, 1
+       jz .zero
+       inc edi                     ; le bit 0 vaut 1
+   .zero:
+       shr eax, 1
+       jmp .boucle
+   .fin:
+       mov eax, 60                 ; code de sortie 8
+       syscall
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_7_1.asm =====
+
+--- 7.2 ---
+   x * 10 = x * 8 + x * 2
+       mov rbx, rax
+       shl rax, 3                  ; rax = x * 8
+       shl rbx, 1                  ; rbx = x * 2
+       add rax, rbx                ; rax = x * 10
+   Version avec lea : lea rax, [rax + rax*4] (x5) puis add rax, rax (x2).
+
+--- 7.3 ---
+   Une puissance de 2 a un seul bit à 1 ; x - 1 met ce bit à 0 et tous
+   ceux en dessous à 1. Donc x & (x - 1) = 0.
+       ; rdi = x ; rax = 1 si puissance de 2, sinon 0
+       xor eax, eax
+       test rdi, rdi
+       jz .non                     ; 0 n'est pas une puissance de 2
+       lea rcx, [rdi - 1]
+       test rdi, rcx               ; x & (x - 1)
+       jnz .non
+       mov eax, 1
+   .non:
+
+--- 8.1 ---
+   ; ===== fichier corr_8_1.asm =====
+   bits 64
+   section .text
+   global _start
+   _start:
+       mov rax, -5
+       mov rbx, 17
+       mov rcx, 3
+
+       ; --- avec des sauts ---
+       mov rdx, rax                ; max = a
+       cmp rbx, rdx
+       jle .pas_b
+       mov rdx, rbx                ; b > max
+   .pas_b:
+       cmp rcx, rdx
+       jle .pas_c
+       mov rdx, rcx                ; c > max
+   .pas_c:
+
+       ; --- avec cmov ---
+       mov rdi, rax
+       cmp rbx, rdi
+       cmovg rdi, rbx
+       cmp rcx, rdi
+       cmovg rdi, rcx
+
+       cmp rdi, rdx                ; les deux doivent donner 17
+       jne .erreur
+       mov eax, 60
+       syscall
+   .erreur:
+       mov edi, 255
+       mov eax, 60
+       syscall
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_8_1.asm =====
+
+--- 8.2 ---
+   ; ===== fichier corr_8_2.asm =====
+   bits 64
+   section .text
+   global _start
+   _start:
+       mov eax, 1                  ; F(i - 1)
+       mov edx, 1                  ; F(i)
+       mov ecx, 2                  ; i = 2
+   .boucle:
+       cmp ecx, 12
+       jae .fin
+       lea r8, [rax + rdx]         ; F(i + 1) = F(i - 1) + F(i)
+       mov rax, rdx
+       mov rdx, r8
+       inc ecx
+       jmp .boucle
+   .fin:
+       mov edi, edx                ; F(12) = 144
+       mov eax, 60
+       syscall
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_8_2.asm =====
+
+--- 8.3 ---
+   ; ===== fichier corr_8_3.asm =====
+   ; PGCD(a, b) : tant que b != 0 : (a, b) = (b, a mod b)
+   bits 64
+   section .text
+   global _start
+   _start:
+       mov eax, 1071               ; a
+       mov ebx, 462                ; b
+   .boucle:
+       test ebx, ebx
+       jz .fin
+       xor edx, edx
+       div ebx                     ; edx = a mod b
+       mov eax, ebx                ; a = b
+       mov ebx, edx                ; b = a mod b
+       jmp .boucle
+   .fin:
+       mov edi, eax                ; 21
+       mov eax, 60
+       syscall
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_8_3.asm =====
+
+--- 8.4 ---
+   ; ===== fichier corr_8_4.asm =====
+   ; Compte les nombres premiers < 100 par divisions successives.
+   bits 64
+   section .text
+   global _start
+   _start:
+       xor r12d, r12d              ; compteur de premiers
+       mov ebx, 2                  ; n = 2
+   .nombre:
+       cmp ebx, 100
+       jae .fin
+       mov ecx, 2                  ; diviseur d = 2
+   .diviseur:
+       mov eax, ecx
+       imul eax, ecx               ; d * d
+       cmp eax, ebx
+       ja .premier                 ; d * d > n : aucun diviseur trouvé
+       mov eax, ebx
+       xor edx, edx
+       div ecx
+       test edx, edx
+       jz .suivant                 ; reste nul : n n'est pas premier
+       inc ecx
+       jmp .diviseur
+   .premier:
+       inc r12d
+   .suivant:
+       inc ebx
+       jmp .nombre
+   .fin:
+       mov edi, r12d               ; 25
+       mov eax, 60
+       syscall
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_8_4.asm =====
+
+--- 9.1 ---
+   ; ===== fichier corr_9_1.asm =====
+   bits 64
+   default rel
+   section .text
+   global _start
+   _start:
+       mov ecx, 1
+   .empiler:
+       push rcx                    ; empile 1, 2, 3, 4, 5
+       inc ecx
+       cmp ecx, 5
+       jbe .empiler
+
+       xor ebx, ebx                ; nombre = 0
+       mov r12d, 5
+   .depiler:
+       pop rax                     ; sort 5, puis 4, 3, 2, 1
+       imul rbx, rbx, 10
+       add rbx, rax                ; nombre = 10 * nombre + chiffre
+       dec r12d
+       jnz .depiler
+
+       mov rdi, rbx
+       call afficher_nombre        ; 54321
+       call nouvelle_ligne
+       xor edi, edi
+       call quitter
+
+   %include "outils.asm"
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_9_1.asm =====
+   On obtient 54321 : les valeurs ressortent dans l'ordre INVERSE de leur
+   entrée (dernier entré, premier sorti).
+
+--- 9.2 ---
+   Soit A la valeur de rsp au départ.
+   push rax        [A - 8]    rax                  rsp = A - 8
+   push rbx        [A - 16]   rbx                  rsp = A - 16
+   call f          [A - 24]   adresse de retour    rsp = A - 24
+   push rbp        [A - 32]   ancien rbp           rsp = A - 32, rbp = A - 32
+   sub rsp, 16     [A - 40]   variable locale 1    (= [rbp - 8])
+                   [A - 48]   variable locale 2    (= [rbp - 16]) rsp = A - 48
+   Si A était un multiple de 16 (pile alignée), A - 48 l'est aussi : f peut
+   appeler d'autres fonctions sans problème d'alignement.
+
+--- 10.1 à 10.4 ---
+   ; ===== fichier corr_10.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   t:      dq 1, 2, 3, 4, 5
+
+   section .text
+   global _start
+
+   _start:
+       mov edi, 3
+       mov esi, 4
+       call puissance
+       mov rdi, rax
+       call afficher_nombre        ; 81
+       call nouvelle_ligne
+
+       mov edi, 10
+       call fibonacci
+       mov rdi, rax
+       call afficher_nombre        ; 55
+       call nouvelle_ligne
+
+       sub rsp, 16                 ; deux variables locales
+       mov qword [rsp], 3
+       mov qword [rsp + 8], 4
+       lea rdi, [rsp]
+       lea rsi, [rsp + 8]
+       call echanger
+       mov rdi, [rsp]
+       call afficher_nombre        ; 4
+       mov edi, ' '
+       call afficher_caractere
+       mov rdi, [rsp + 8]
+       call afficher_nombre        ; 3
+       call nouvelle_ligne
+       add rsp, 16
+
+       lea rdi, [t]
+       mov esi, 5
+       call somme_tableau
+       mov rdi, rax
+       call afficher_nombre        ; 15
+       call nouvelle_ligne
+
+       xor edi, edi
+       call quitter
+
+   ; 10.1 -- uint64_t puissance(uint64_t base, uint64_t exp)
+   puissance:
+       mov eax, 1
+   .boucle:
+       test rsi, rsi
+       jz .fin
+       imul rax, rdi
+       dec rsi
+       jmp .boucle
+   .fin:
+       ret
+
+   ; 10.2 -- uint64_t fibonacci(uint64_t n), F(0) = 0, F(1) = 1
+   fibonacci:
+       cmp rdi, 2
+       jae .recursion
+       mov rax, rdi                ; F(0) = 0, F(1) = 1
+       ret
+   .recursion:
+       push rbx                    ; deux registres préservés utilisés
+       push r12
+       sub rsp, 8                  ; 8 + 16 + 8 = 32 : pile alignée
+       mov rbx, rdi                ; n survit aux appels dans rbx
+       lea rdi, [rbx - 1]
+       call fibonacci              ; F(n - 1)
+       mov r12, rax                ; qui survit dans r12
+       lea rdi, [rbx - 2]
+       call fibonacci              ; F(n - 2)
+       add rax, r12
+       add rsp, 8
+       pop r12
+       pop rbx
+       ret
+
+   ; 10.3 -- void echanger(uint64_t *a, uint64_t *b)
+   echanger:
+       mov rax, [rdi]
+       mov rdx, [rsi]
+       mov [rdi], rdx
+       mov [rsi], rax
+       ret
+
+   ; 10.4 -- uint64_t somme_tableau(const uint64_t *t, uint64_t n)
+   somme_tableau:
+       xor eax, eax
+       test rsi, rsi
+       jz .fin
+   .boucle:
+       add rax, [rdi]
+       add rdi, 8
+       dec rsi
+       jnz .boucle
+   .fin:
+       ret
+
+   %include "outils.asm"
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_10.asm =====
+
+--- 11.1 ---
+   ; ===== fichier corr_11_1.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   question:   db "Comment t'appelles-tu ? ", 0
+   bonjour:    db "Bonjour ", 0
+   final:      db " !", 10, 0
+
+   section .bss
+   prenom:     resb 64
+
+   section .text
+   global _start
+
+   _start:
+       lea rdi, [question]
+       call afficher_chaine
+
+       xor eax, eax                ; read(0, prenom, 63)
+       xor edi, edi
+       lea rsi, [prenom]
+       mov edx, 63                 ; on garde une place pour le 0 final
+       syscall
+       test rax, rax
+       jle .fin
+
+       cmp byte [rsi + rax - 1], 10    ; le retour à la ligne tapé...
+       jne .terminer
+       dec rax                         ; ...est retiré
+   .terminer:
+       mov byte [rsi + rax], 0         ; chaîne terminée par 0
+
+       lea rdi, [bonjour]
+       call afficher_chaine
+       lea rdi, [prenom]
+       call afficher_chaine
+       lea rdi, [final]
+       call afficher_chaine
+   .fin:
+       xor edi, edi
+       call quitter
+
+   %include "outils.asm"
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_11_1.asm =====
+
+--- 11.2 ---
+   ; ===== fichier corr_11_2.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   invite:     db "Nombre : ", 0
+   resultat:   db "Somme : ", 0
+
+   section .text
+   global _start
+
+   _start:
+       lea rdi, [invite]
+       call afficher_chaine
+       call lire_nombre
+       mov rbx, rax                ; premier nombre dans rbx (préservé)
+
+       lea rdi, [invite]
+       call afficher_chaine
+       call lire_nombre
+       add rbx, rax
+
+       lea rdi, [resultat]
+       call afficher_chaine
+       mov rdi, rbx
+       call afficher_nombre
+       call nouvelle_ligne
+       xor edi, edi
+       call quitter
+
+   ; uint64_t lire_nombre(void) : lit une ligne, convertit les chiffres
+   ; du début (s'arrête au premier caractère qui n'est pas un chiffre)
+   lire_nombre:
+       sub rsp, 40                 ; tampon de 32 octets, pile alignée
+       xor eax, eax                ; read(0, tampon, 32)
+       xor edi, edi
+       mov rsi, rsp
+       mov edx, 32
+       syscall
+       mov rcx, rax                ; rcx = octets lus (négatif si erreur)
+       xor eax, eax                ; résultat = 0
+       xor edx, edx                ; indice = 0
+   .chiffre:
+       cmp rdx, rcx
+       jge .fin
+       movzx r8d, byte [rsp + rdx]
+       sub r8d, '0'
+       cmp r8d, 9
+       ja .fin                     ; pas un chiffre (retour à la ligne...)
+       imul rax, rax, 10           ; résultat = résultat * 10 + chiffre
+       add rax, r8
+       inc rdx
+       jmp .chiffre
+   .fin:
+       add rsp, 40
+       ret
+
+   %include "outils.asm"
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_11_2.asm =====
+   Au clavier, chaque read reçoit une ligne. Attention : avec un tube
+   (printf "12\n30\n" | ./corr_11_2), les deux lignes peuvent arriver dans le
+   même read et la seconde serait perdue. Un programme robuste garde un
+   tampon entre deux appels (c'est ce que fait la bibliothèque C).
+
+--- 11.3 ---
+   ; ===== fichier corr_11_3.asm =====
+   ; cat minimal : ./corr_11_3 fichier
+   bits 64
+   default rel
+
+   TAILLE  equ 4096
+
+   section .rodata
+   usage:  db "usage : cat fichier", 10, 0
+
+   section .bss
+   tampon: resb TAILLE
+
+   section .text
+   global _start
+
+   _start:
+       cmp qword [rsp], 2          ; argc >= 2 ?
+       jb .usage
+       mov rdi, [rsp + 16]         ; argv[1]
+       mov eax, 2                  ; open(argv[1], O_RDONLY)
+       xor esi, esi
+       syscall
+       test rax, rax
+       js .erreur
+       mov rbx, rax                ; descripteur
+
+   .bloc:
+       xor eax, eax                ; read(fd, tampon, TAILLE)
+       mov rdi, rbx
+       lea rsi, [tampon]
+       mov edx, TAILLE
+       syscall
+       test rax, rax
+       jz .fin                     ; fin du fichier
+       js .erreur
+       mov rdx, rax                ; write(1, tampon, octets lus)
+       mov eax, 1
+       mov edi, 1
+       syscall
+       jmp .bloc
+
+   .fin:
+       mov eax, 3                  ; close
+       mov rdi, rbx
+       syscall
+       xor edi, edi
+       call quitter
+   .usage:
+       lea rdi, [usage]
+       call afficher_chaine
+       mov edi, 1
+       call quitter
+   .erreur:
+       neg rax
+       mov rdi, rax                ; code de sortie = errno
+       call quitter
+
+   %include "outils.asm"
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_11_3.asm =====
+
+--- 11.4 ---
+   ; ===== fichier corr_11_4.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   chiffres_hexa:  db "0123456789ABCDEF"
+
+   section .text
+   global _start
+
+   _start:
+       mov rdi, 0xDEADBEEF12345678
+       call afficher_hexa
+       call nouvelle_ligne
+       mov edi, 255
+       call afficher_hexa          ; 00000000000000FF
+       call nouvelle_ligne
+       xor edi, edi
+       call quitter
+
+   ; void afficher_hexa(uint64_t n) : 16 chiffres hexadécimaux
+   afficher_hexa:
+       sub rsp, 24
+       lea r8, [chiffres_hexa]
+       lea rsi, [rsp + 16]         ; fin du texte (16 caractères)
+       mov ecx, 16
+   .chiffre:
+       mov eax, edi
+       and eax, 0xF                ; les 4 bits bas
+       mov al, [r8 + rax]          ; valeur -> caractère
+       dec rsi
+       mov [rsi], al
+       shr rdi, 4                  ; chiffre hexa suivant
+       dec ecx
+       jnz .chiffre
+       mov eax, 1                  ; write(1, rsi, 16) ; rsi = rsp ici
+       mov edi, 1
+       mov edx, 16
+       syscall
+       add rsp, 24
+       ret
+
+   %include "outils.asm"
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_11_4.asm =====
+
+--- 12.1 et 12.2 ---
+   ; ===== fichier corr_12.asm =====
+   bits 64
+   default rel
+
+   section .rodata
+   phrase: db "les instructions de chaines sont pratiques", 0
+
+   section .data
+   zone:   db "123456789", 0
+
+   section .text
+   global _start
+
+   _start:
+       lea rdi, [phrase]
+       mov esi, 's'
+       call compter_caractere
+       mov rdi, rax
+       call afficher_nombre            ; 6
+       call nouvelle_ligne
+
+       lea rsi, [zone]                 ; source : "12345"
+       lea rdi, [zone + 2]             ; destination : 2 octets plus loin
+       mov edx, 5
+       call deplacer
+       lea rdi, [zone]
+       call afficher_chaine            ; 121234589
+       call nouvelle_ligne
+
+       xor edi, edi
+       call quitter
+
+   ; 12.1 -- uint64_t compter_caractere(const char *s, char c)
+   compter_caractere:
+       mov edx, esi                    ; dl = c (rsi va servir à lodsb)
+       mov rsi, rdi
+       xor ecx, ecx
+   .boucle:
+       lodsb                           ; al = *s++
+       test al, al
+       jz .fin
+       cmp al, dl
+       jne .boucle
+       inc rcx
+       jmp .boucle
+   .fin:
+       mov rax, rcx
+       ret
+
+   ; 12.2 -- void deplacer(char *dest, const char *src, uint64_t n)
+   deplacer:
+       mov rcx, rdx
+       cmp rdi, rsi
+       jbe .en_avant                   ; destination avant la source
+       lea rsi, [rsi + rcx - 1]        ; on part des DERNIERS octets
+       lea rdi, [rdi + rcx - 1]
+       std                             ; les adresses vont diminuer
+       rep movsb
+       cld                             ; OBLIGATOIRE : DF = 0 au retour
+       ret
+   .en_avant:
+       rep movsb
+       ret
+
+   %include "outils.asm"
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de corr_12.asm =====
+   Avec une copie en avant, "12345" copié 2 octets plus loin donnerait
+   "121212189" : les octets 1 et 2 écrasent 3 et 4 avant d'être lus.
+
+--- 13 ---
+   (Pas d'exercice : essaie de transformer la boîte à outils en macros, et
+   compare la taille des exécutables avec ls -l.)
+
+--- 14.1 ---
+   ; ===== fichier voyelles.asm =====
+   bits 64
+   default rel
+
+   section .text
+   global compter_voyelles
+
+   ; uint64_t compter_voyelles(const char *s)
+   compter_voyelles:
+       xor eax, eax
+   .boucle:
+       movzx ecx, byte [rdi]
+       test ecx, ecx
+       jz .fin
+       or ecx, 0x20                ; en minuscule (inoffensif ici pour les
+                                   ; autres caractères, qui ne matchent pas)
+       cmp ecx, 'a'
+       je .voyelle
+       cmp ecx, 'e'
+       je .voyelle
+       cmp ecx, 'i'
+       je .voyelle
+       cmp ecx, 'o'
+       je .voyelle
+       cmp ecx, 'u'
+       je .voyelle
+       cmp ecx, 'y'
+       jne .suivant
+   .voyelle:
+       inc rax
+   .suivant:
+       inc rdi
+       jmp .boucle
+   .fin:
+       ret
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de voyelles.asm =====
+
+   // ===== fichier voyelles_test.c =====
+   #include <stdio.h>
+   #include <stdint.h>
+
+   uint64_t compter_voyelles(const char *s);
+
+   int main(void)
+   {
+       const char *texte = "Bonjour tout le Monde, ceci est un TEST";
+       printf("%llu voyelles\n", (unsigned long long)compter_voyelles(texte));
+       return 0;
+   }
+   // ===== fin de voyelles_test.c =====
+
+   nasm -f elf64 voyelles.asm -o voyelles.o
+   gcc -Wall voyelles_test.c voyelles.o -o voyelles_test
+   ./voyelles_test                 -> 13 voyelles
+
+--- 14.2 ---
+   ; ===== fichier tri.asm =====
+   ; Trie un tableau avec qsort (bibliothèque C) et une fonction de
+   ; comparaison écrite en assembleur.
+   ; nasm -f elf64 tri.asm -o tri.o && gcc tri.o -o tri
+   bits 64
+   default rel
+
+   extern qsort
+   extern printf
+
+   section .data
+   tableau:    dq 42, -7, 1000, 3, 0, 15
+   NB          equ ($ - tableau) / 8
+
+   section .rodata
+   format:     db "%lld ", 0
+   fin_ligne:  db 10, 0
+
+   section .text
+   global main
+
+   main:
+       push rbx                    ; 8 + 8 = 16 : pile alignée
+
+       lea rdi, [tableau]          ; qsort(tableau, NB, 8, comparer)
+       mov esi, NB
+       mov edx, 8
+       lea rcx, [comparer]         ; POINTEUR DE FONCTION
+       call qsort wrt ..plt
+
+       xor ebx, ebx
+   .afficher:
+       lea rax, [tableau]
+       mov rsi, [rax + rbx*8]
+       lea rdi, [format]
+       xor eax, eax
+       call printf wrt ..plt
+       inc rbx
+       cmp rbx, NB
+       jb .afficher
+       lea rdi, [fin_ligne]
+       xor eax, eax
+       call printf wrt ..plt
+
+       xor eax, eax
+       pop rbx
+       ret
+
+   ; int comparer(const void *a, const void *b) : -1, 0 ou 1
+   comparer:
+       mov rcx, [rdi]              ; *a (int64_t)
+       mov rdx, [rsi]              ; *b
+       xor eax, eax
+       cmp rcx, rdx
+       setg al                     ; al = 1 si a > b
+       setl cl                     ; cl = 1 si a < b
+       movzx ecx, cl
+       sub eax, ecx                ; (a > b) - (a < b)
+       ret
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+   ; ===== fin de tri.asm =====
+   ./tri   -> -7 0 3 15 42 1000
+
+   On n'écrit pas simplement "sub rax, rdx" pour comparer : la différence de
+   deux int64_t peut déborder, et qsort n'utilise que les 32 bits bas (int).
+
+--- 16.1 ---
+   Dans gdb : break factorielle, run, puis à chaque arrêt x/8xg $rsp. On voit
+   s'empiler, pour chaque niveau : l'adresse de retour (dans factorielle,
+   juste après le call) et la valeur de n sauvegardée par push rdi (5, 4, 3,
+   2...). bt montre les niveaux d'appels.
+
+--- 16.2 ---
+   Avec un push de trop, le ret dépile la valeur poussée au lieu de
+   l'adresse de retour : rip prend cette valeur et le programme plante
+   (Segmentation fault). Dans gdb, p $rip après le plantage montre
+   exactement la valeur empilée par erreur.
+
+--- 17.1 ---
+   ; ===== fichier secteur_couleur.asm =====
+   ; Écrit directement dans la mémoire vidéo depuis le mode réel.
+   bits 16
+   org 0x7C00
+
+   debut:
+       cli
+       xor ax, ax
+       mov ds, ax
+       mov ss, ax
+       mov sp, 0x7C00
+       sti
+       cld
+
+       mov ax, 0xB800
+       mov es, ax              ; es:0000 = adresse physique 0xB8000
+       mov di, 12 * 80 * 2     ; ligne 12, colonne 0 (2 octets par case)
+       mov si, message
+       mov ah, 0x1E            ; couleur : fond bleu (1), texte jaune (E)
+   .boucle:
+       lodsb                   ; al = caractère suivant
+       test al, al
+       jz .fin
+       stosw                   ; [es:di] = ax (caractère ET couleur), di += 2
+       jmp .boucle
+
+   .fin:
+       cli
+       hlt
+       jmp .fin
+
+   message: db "Bonjour en couleurs, sans le BIOS !", 0
+
+       times 510 - ($ - $$) db 0
+       dw 0xAA55
+   ; ===== fin de secteur_couleur.asm =====
+
+   stosw écrit ax en little-endian : al (le caractère) puis ah (la couleur),
+   exactement l'ordre d'une case de l'écran. Pas de 13, 10 dans le message :
+   sans le BIOS, ce ne sont plus des retours à la ligne, mais deux symboles
+   affichés tels quels.
+
+--- 17.2 et 17.3 ---
+   Les deux exercices modifient la boucle du clavier : on les traite
+   ensemble. Quatre changements dans mini_noyau.asm.
+
+   1) Remplacer tout le bloc boucle_clavier (jusqu'à la ligne de
+      commentaire "Écran VGA") par la nouvelle boucle, suivie de la fonction
+      lire_scancode et des fonctions de commandes :
+
+   boucle_clavier:
+       call lire_scancode
+       cmp al, 0x2A                        ; Maj gauche enfoncée
+       je .maj_appui
+       cmp al, 0x36                        ; Maj droite enfoncée
+       je .maj_appui
+       cmp al, 0xAA                        ; Maj gauche relâchée (0x2A + 0x80)
+       je .maj_relache
+       cmp al, 0xB6                        ; Maj droite relâchée
+       je .maj_relache
+       test al, 0x80
+       jnz boucle_clavier                  ; autre relâchement : ignoré
+       movzx eax, al
+       cmp eax, TAILLE_TABLE
+       jae boucle_clavier
+       mov rdx, table_azerty               ; choix de la table
+       cmp byte [maj_enfoncee], 0
+       je .traduire
+       mov rdx, table_azerty_maj
+   .traduire:
+       mov al, [rdx + rax]
+       test al, al
+       jz boucle_clavier
+       cmp al, 10
+       je .entree
+       cmp al, 8
+       je .effacement
+       mov rcx, [longueur_ligne]           ; caractère ordinaire : on le range
+       cmp rcx, TAILLE_LIGNE
+       jae boucle_clavier                  ; ligne pleine : ignoré
+       mov [ligne + rcx], al
+       inc qword [longueur_ligne]
+       call afficher_car
+       jmp boucle_clavier
+   .effacement:
+       cmp qword [longueur_ligne], 0
+       je boucle_clavier                   ; ne pas effacer l'invite "> "
+       dec qword [longueur_ligne]
+       call afficher_car
+       jmp boucle_clavier
+   .entree:
+       call afficher_car
+       call executer_commande
+       mov qword [longueur_ligne], 0       ; ligne suivante : tampon vide
+       mov rsi, msg_invite
+       call afficher_texte
+       jmp boucle_clavier
+   .maj_appui:
+       mov byte [maj_enfoncee], 1
+       jmp boucle_clavier
+   .maj_relache:
+       mov byte [maj_enfoncee], 0
+       jmp boucle_clavier
+
+   ; lire_scancode : attend une touche et renvoie son scancode dans al
+   ; (version par scrutation)
+   lire_scancode:
+       in al, 0x64
+       test al, 1
+       jnz .pret
+       pause
+       jmp lire_scancode
+   .pret:
+       in al, 0x60
+       ret
+
+   ; executer_commande : compare la ligne tapée aux commandes connues
+   executer_commande:
+       push rax
+       push rsi
+       mov rsi, cmd_aide
+       call ligne_egale
+       test eax, eax
+       jnz .aide
+       mov rsi, cmd_effacer
+       call ligne_egale
+       test eax, eax
+       jnz .effacer
+       cmp qword [longueur_ligne], 0
+       je .fin                             ; ligne vide : rien à faire
+       mov rsi, msg_inconnue
+       call afficher_texte
+       jmp .fin
+   .aide:
+       mov rsi, msg_aide
+       call afficher_texte
+       jmp .fin
+   .effacer:
+       call effacer_ecran
+   .fin:
+       pop rsi
+       pop rax
+       ret
+
+   ; ligne_egale : rsi = commande terminée par 0
+   ; renvoie rax = 1 si la ligne tapée est identique, 0 sinon
+   ligne_egale:
+       push rcx
+       push rsi
+       push rdi
+       xor eax, eax
+       mov rcx, [longueur_ligne]
+       test rcx, rcx
+       jz .fin                             ; ligne vide : différente
+       mov rdi, ligne
+       repe cmpsb                          ; compare octet par octet
+       jne .fin                            ; un caractère diffère
+       cmp byte [rsi], 0                   ; la commande doit finir aussi
+       jne .fin                            ; (sinon "aid" égalerait "aide")
+       mov eax, 1
+   .fin:
+       pop rdi
+       pop rsi
+       pop rcx
+       ret
+
+   2) Ajouter les variables après la ligne msg_arret :
+
+   maj_enfoncee:       db 0
+   TAILLE_LIGNE        equ 76
+   longueur_ligne:     dq 0
+   ligne:              times TAILLE_LIGNE db 0
+   cmd_aide:           db "aide", 0
+   cmd_effacer:        db "effacer", 0
+   msg_aide:           db "Commandes : aide, effacer", 10, 0
+   msg_inconnue:       db "Commande inconnue (tape aide)", 10, 0
+
+   3) Ajouter la table majuscule juste APRÈS la ligne
+      "TAILLE_TABLE equ $ - table_azerty" :
+
+   ; Même table avec Maj enfoncée (même taille que table_azerty !)
+   table_azerty_maj:
+       db 0, 0                                     ; 0x00, 0x01
+       db '1', '2', '3', '4', '5', '6', '7', '8'   ; 0x02 - 0x09
+       db '9', '0', 0xF8, '+'                      ; 0x0A - 0x0D (0xF8 = °)
+       db 8, 0                                     ; 0x0E, 0x0F
+       db 'A', 'Z', 'E', 'R', 'T', 'Y', 'U', 'I'   ; 0x10 - 0x17
+       db 'O', 'P', 0, 0x9C                        ; 0x18 - 0x1B (tréma
+                                                   ;   ignoré, 0x9C = £)
+       db 10, 0                                    ; 0x1C, 0x1D
+       db 'Q', 'S', 'D', 'F', 'G', 'H', 'J', 'K'   ; 0x1E - 0x25
+       db 'L', 'M', '%', 0                         ; 0x26 - 0x29
+       db 0, 0xE6                                  ; 0x2A, 0x2B (0xE6 = µ)
+       db 'W', 'X', 'C', 'V', 'B', 'N'             ; 0x2C - 0x31
+       db '?', '.', '/', 0x15                      ; 0x32 - 0x35 (0x15 = §)
+       db 0, '*', 0, ' '                           ; 0x36 - 0x39
+       times TAILLE_TABLE - ($ - table_azerty_maj) db 0   ; vérification
+
+   4) Rien d'autre : l'image fait toujours 9 secteurs (NASM refuserait
+      d'assembler sinon, voir 17.13).
+
+   Points importants :
+   - Maj ne produit aucun caractère : on retient seulement son état. Le
+     relâchement de Maj est un "break" (code + 0x80) qu'il faut traiter AVANT
+     le test qui ignore les relâchements.
+   - La dernière ligne de la table utilise times comme vérification : si la
+     table est trop longue, "TIMES value ... is negative" ; trop courte, elle
+     est complétée par des 0.
+   - repe cmpsb seul ne suffit pas : "aid" est le début de "aide". D'où le
+     test final cmp byte [rsi], 0 : la commande doit se terminer là où se
+     termine la ligne tapée.
+   - Le compteur longueur_ligne empêche aussi de gommer l'invite "> " avec
+     le retour arrière, défaut de la version du 17.13.
+
+   Essai dans QEMU (touches tapées : Maj+a i d e, Entrée, a i d e, Entrée,
+   a i d, Entrée) :
+   > Aide
+   Commande inconnue (tape aide)
+   > aide
+   Commandes : aide, effacer
+   > aid
+   Commande inconnue (tape aide)
+
+--- 17.4 ---
+   On part de la version 17.2/17.3. Grâce à la fonction lire_scancode, la
+   boucle du clavier ne change pas : seule la façon d'obtenir un scancode
+   change.
+
+   1) Remplacer lire_scancode (version par scrutation) par :
+
+   ; lire_scancode : attend une touche et renvoie son scancode dans al
+   ; (version par interruption : le processeur dort entre deux touches)
+   lire_scancode:
+       cli                                 ; pas d'interruption pendant le test
+       cmp byte [touche_disponible], 0
+       jne .pret
+       sti                                 ; sti ne prend effet qu'APRÈS
+       hlt                                 ; l'instruction suivante : aucune
+       jmp lire_scancode                   ; IRQ ne peut arriver entre les deux
+   .pret:
+       mov byte [touche_disponible], 0
+       mov al, [scancode_recu]
+       sti
+       ret
+
+   2) Remplacer installer_idt par cette version, qui s'appuie sur une petite
+      fonction definir_vecteur et ajoute le vecteur 33 :
+
+   installer_idt:
+       push rax
+       push rcx
+       push rsi
+       mov rsi, adresses_exceptions
+       xor ecx, ecx
+   .exception:
+       mov rax, [rsi + rcx*8]              ; routine de l'exception n° rcx
+       call definir_vecteur
+       inc ecx
+       cmp ecx, 32
+       jb .exception
+       mov ecx, 33                         ; IRQ 1 remappée sur le vecteur 33
+       mov rax, irq_clavier
+       call definir_vecteur
+       lidt [idt_desc]
+       pop rsi
+       pop rcx
+       pop rax
+       ret
+
+   ; definir_vecteur : l'entrée rcx de l'IDT pointe vers la routine rax
+   definir_vecteur:
+       push rax
+       push rdi
+       mov rdi, rcx
+       shl rdi, 4                          ; 16 octets par entrée
+       add rdi, idt
+       mov [rdi], ax                       ; bits 0 à 15
+       mov word [rdi + 2], 0x08            ; segment de code
+       mov byte [rdi + 4], 0               ; IST
+       mov byte [rdi + 5], 0x8E            ; porte d'interruption, anneau 0
+       shr rax, 16
+       mov [rdi + 6], ax                   ; bits 16 à 31
+       shr rax, 16
+       mov [rdi + 8], eax                  ; bits 32 à 63
+       mov dword [rdi + 12], 0
+       pop rdi
+       pop rax
+       ret
+
+   3) Ajouter la routine d'interruption, la reprogrammation des PIC et le
+      vidage du contrôleur clavier (par exemple juste après definir_vecteur) :
+
+   ; irq_clavier : routine de l'IRQ 1, appelée par le processeur (vecteur 33)
+   irq_clavier:
+       push rax
+       in al, 0x60                         ; lire le scancode (obligatoire :
+       mov [scancode_recu], al             ; sinon le clavier n'envoie plus rien)
+       mov byte [touche_disponible], 1
+       mov al, 0x20                        ; fin d'interruption (EOI)
+       out 0x20, al                        ; au PIC maître
+       pop rax
+       iretq
+
+   ; remapper_pic : IRQ 0-7 -> vecteurs 32-39, IRQ 8-15 -> vecteurs 40-47,
+   ; puis masque tout sauf l'IRQ 1 (clavier)
+   remapper_pic:
+       push rax
+       mov al, 0x11                        ; ICW1 : initialisation
+       out 0x20, al                        ;   PIC maître
+       out 0xA0, al                        ;   PIC esclave
+       mov al, 32                          ; ICW2 : premier vecteur du maître
+       out 0x21, al
+       mov al, 40                          ;        premier vecteur de l'esclave
+       out 0xA1, al
+       mov al, 4                           ; ICW3 : esclave branché sur l'IRQ 2
+       out 0x21, al
+       mov al, 2                           ;        (l'esclave, lui, reçoit 2)
+       out 0xA1, al
+       mov al, 1                           ; ICW4 : mode 8086
+       out 0x21, al
+       out 0xA1, al
+       mov al, 0xFD                        ; masque maître : 1111 1101
+       out 0x21, al                        ;   seule l'IRQ 1 est autorisée
+       mov al, 0xFF                        ; masque esclave : tout bloqué
+       out 0xA1, al
+       pop rax
+       ret
+
+   ; vider_clavier : jette les octets restés dans le contrôleur clavier
+   ; (sinon l'IRQ 1 risque de ne jamais se déclencher)
+   vider_clavier:
+       push rax
+   .boucle:
+       in al, 0x64
+       test al, 1
+       jz .fin
+       in al, 0x60
+       jmp .boucle
+   .fin:
+       pop rax
+       ret
+
+   4) Dans les données, remplacer l'IDT de 32 entrées par une IDT de 48
+      entrées (les vecteurs 32 à 47 des IRQ), et ajouter deux variables :
+
+   idt:
+       times 48 * 16 db 0                  ; vecteurs 0 à 47
+   idt_desc:
+       dw 48 * 16 - 1
+       dq idt
+   scancode_recu:      db 0
+   touche_disponible:  db 0
+
+   5) Dans mode_long, juste après call installer_idt, ajouter :
+          call remapper_pic
+          call vider_clavier
+
+   Le comportement à l'écran est identique à celui du 17.3. La différence se
+   voit dans le moniteur de QEMU (option -monitor stdio, commande
+   "info registers") : avec la scrutation, le processeur tourne sans arrêt
+   (HLT=0) ; avec l'interruption, il dort entre deux touches (HLT=1).
+
+   Points importants :
+   - L'ordre compte : IDT installée, PIC reprogrammés et masqués, contrôleur
+     clavier vidé, et SEULEMENT ENSUITE sti (dans lire_scancode).
+   - Sans l'EOI (out 0x20, 0x20), le PIC croit l'IRQ 1 toujours en cours et
+     n'en envoie plus aucune : une seule touche fonctionnerait.
+   - La routine d'interruption doit conserver TOUS les registres qu'elle
+     modifie (ici rax) : elle interrompt du code qui ne s'y attend pas.
+   - Le couple "sti / hlt" est sûr : sti n'autorise les interruptions
+     qu'après l'instruction suivante, donc aucune IRQ ne peut arriver entre
+     le test de touche_disponible et hlt (sinon le processeur pourrait
+     s'endormir avec une touche en attente).
+   - Limite : une seule case pour le scancode. Si deux touches arrivent avant
+     d'être traitées, la première est perdue. L'amélioration naturelle est un
+     tampon circulaire (par exemple 32 octets, un indice d'écriture pour la
+     routine et un indice de lecture pour lire_scancode).
+   - Pour aller plus loin : l'IRQ 0 (horloge PIT, vecteur 32) pour compter le
+     temps, puis le passage à l'APIC, qui remplace les PIC sur les machines
+     modernes (wiki.osdev.org).
+
+
+================================================================================
+                               FIN DU COURS
+     Prochaine étape : écris un vrai petit projet en assembleur. Sous Linux,
+     un outil en ligne de commande (un wc, un grep simplifié). Sans système,
+     prolonge le mini noyau : tampon clavier circulaire, horloge, allocateur
+     de mémoire, lecture du disque en mode 64 bits. C'est en construisant
+     que les registres, la pile et les adresses deviennent naturels.
+================================================================================

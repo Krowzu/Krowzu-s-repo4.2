@@ -1,0 +1,5276 @@
+================================================================================
+                    APPRENDRE LE LANGAGE RUST DE ZÉRO
+         Du premier programme jusqu'au no_std, avec un gros morceau sur la
+           mémoire : possession, emprunts, références et pointeurs
+================================================================================
+
+SOMMAIRE
+
+   0. Avant de commencer : c'est quoi Rust, installation, Cargo
+   1. Le premier programme
+   2. Variables et types de base
+   3. Les opérateurs
+   4. Le contrôle du flux
+   5. Les fonctions
+   6. LA POSSESSION (ownership)                     \
+   7. LES RÉFÉRENCES, LES EMPRUNTS ET LES DURÉES     |  la mémoire :
+      DE VIE                                         |  le cœur de Rust
+   8. Les structures et les méthodes                 |
+   9. Les énumérations et le pattern matching        |
+  10. Chaînes, vecteurs et tables de hachage         |
+  11. La gestion des erreurs                         |
+  12. Les génériques et les traits                   |
+  13. Les closures et les itérateurs                 |
+  14. LES POINTEURS : Box, Rc, RefCell, pointeurs   /
+      bruts et unsafe
+  15. Modules, crates, Cargo et tests
+  16. Les macros et les attributs
+  17. La concurrence (threads)
+  18. Rust sans bibliothèque standard (no_std)
+  19. Annexes : mots-clés, priorité des opérateurs, erreurs fréquentes,
+      tableau C / Rust
+  20. Corrigés des exercices
+
+Comment utiliser ce cours : lis un chapitre, tape les exemples toi-même,
+compile-les, casse-les exprès pour lire les messages d'erreur, puis fais les
+exercices. En Rust, le compilateur est un professeur très bavard : ses
+messages t'expliquent presque toujours ce qui ne va pas ET comment corriger.
+
+
+================================================================================
+ 0. AVANT DE COMMENCER
+================================================================================
+
+0.1 C'est quoi Rust ?
+---------------------
+Rust est un langage de programmation système, comme le C et le C++. Il a été
+lancé par Graydon Hoare, soutenu par Mozilla, et sa version 1.0 est sortie en
+2015. On le trouve aujourd'hui dans le noyau Linux, Windows, Android, Firefox,
+les navigateurs, les outils en ligne de commande et les systèmes embarqués.
+
+Sa promesse : les PERFORMANCES du C (pas de ramasse-miettes, pas de machine
+virtuelle, accès direct à la mémoire) avec la SÛRETÉ MÉMOIRE garantie à la
+compilation. Toutes les erreurs mortelles du C (pointeur pendant, double
+libération, dépassement de tableau non détecté, accès concurrent à une
+variable) sont soit refusées par le compilateur, soit détectées à
+l'exécution, tant qu'on n'utilise pas le mot-clé unsafe.
+
+Le prix à payer : des règles strictes sur la possession de la mémoire
+(chapitres 6 et 7). Au début, tu vas te battre contre le compilateur. C'est
+normal, et c'est justement là que tu apprends.
+
+Les versions : une nouvelle version de Rust sort toutes les 6 semaines, sans
+casser le code existant. Tous les 3 ans environ sort une "ÉDITION" qui peut
+changer certaines règles : 2015, 2018, 2021, 2024. Ce cours utilise
+l'édition 2024.
+
+
+0.2 Comment un programme Rust devient exécutable
+------------------------------------------------
+   main.rs
+      |
+      |  1. ANALYSE : lecture du code, expansion des macros, résolution des
+      |     noms
+      |  2. VÉRIFICATION DES TYPES
+      |  3. VÉRIFICATION DES EMPRUNTS (le "borrow checker") : c'est ici que
+      |     Rust vérifie que la mémoire est utilisée correctement
+      |  4. GÉNÉRATION DE CODE via LLVM (le même moteur que clang)
+      v
+   fichiers objets (.o)
+      |
+      |  5. ÉDITION DE LIENS (le même linker que pour le C)
+      v
+   exécutable
+
+Le compilateur s'appelle rustc. Mais on l'utilise rarement directement : on
+passe par CARGO, l'outil officiel qui gère les projets, la compilation, les
+dépendances et les tests.
+
+
+0.3 Installer Rust sous Arch Linux
+----------------------------------
+La méthode recommandée passe par rustup, qui gère les versions et les cibles
+de compilation (indispensable pour le chapitre 18) :
+
+   sudo pacman -S rustup
+   rustup default stable
+
+Vérifier :
+   rustc --version
+   cargo --version
+
+Mettre à jour plus tard : rustup update
+
+Outils à connaître (inclus normalement avec le profil par défaut) :
+   rustfmt        formate le code automatiquement      (cargo fmt)
+   clippy         conseils de style et bugs courants  (cargo clippy)
+   rust-analyzer  complétion et erreurs dans l'éditeur
+                  (rustup component add rust-analyzer)
+
+
+0.4 Cargo : les commandes à utiliser pendant tout le cours
+----------------------------------------------------------
+   cargo new mon_projet       crée un projet
+   cd mon_projet
+
+Structure créée :
+   mon_projet/
+   ├── Cargo.toml             description du projet et dépendances
+   └── src/
+       └── main.rs            le code
+
+Contenu de Cargo.toml :
+   [package]
+   name = "mon_projet"
+   version = "0.1.0"
+   edition = "2024"
+
+   [dependencies]
+
+Commandes :
+   cargo run                  compile et lance (mode debug)
+   cargo build                compile seulement -> target/debug/mon_projet
+   cargo build --release      compile optimisé  -> target/release/mon_projet
+   cargo check                vérifie sans produire d'exécutable (très rapide)
+   cargo clippy               analyse le code et donne des conseils
+   cargo fmt                  formate le code
+   cargo test                 lance les tests (chapitre 15)
+   cargo doc --open           génère et ouvre la documentation
+
+Pour un fichier isolé, sans projet :
+   rustc --edition 2024 exercice.rs
+   ./exercice
+
+Le mode DEBUG compile vite, vérifie les dépassements d'entiers et garde les
+infos de débogage. Le mode RELEASE optimise. Pendant l'apprentissage, reste en
+debug.
+
+Comprendre une erreur : chaque erreur a un code, par exemple E0382.
+   rustc --explain E0382
+affiche une explication détaillée avec des exemples.
+
+
+0.5 Une remarque honnête sur "sans bibliothèque"
+------------------------------------------------
+En C, le langage et la bibliothèque sont bien séparés. En Rust, c'est plus
+subtil, parce que la bibliothèque standard est organisée en TROIS couches :
+
+   core   : toujours disponible, même sans système d'exploitation. Contient
+            les types de base, Option, Result, les itérateurs, les slices, le
+            formatage de texte. N'alloue jamais de mémoire.
+   alloc  : ce qui a besoin d'allouer de la mémoire sur le tas : Box, Vec,
+            String, Rc. Nécessite un allocateur.
+   std    : tout le reste, qui a besoin d'un système d'exploitation :
+            fichiers, threads, réseau, affichage dans le terminal (println!).
+            std réexporte aussi core et alloc.
+
+Beaucoup de choses qui semblent "de base" (Option, Vec, String) viennent donc
+de ces bibliothèques, mais elles font partie de ce que tout programmeur Rust
+utilise dès le premier jour. Ce cours utilise std, en précisant quand c'est
+utile d'où vient chaque chose. Le chapitre 18 montre comment écrire du Rust
+avec core uniquement, pour un noyau ou un bootloader.
+
+
+================================================================================
+ 1. LE PREMIER PROGRAMME
+================================================================================
+
+1.1 Bonjour
+-----------
+   cargo new bonjour
+   cd bonjour
+
+src/main.rs contient déjà :
+
+   fn main() {
+       println!("Hello, world!");
+   }
+
+   cargo run
+
+Ce qu'il faut retenir :
+
+- Tout programme commence par la fonction main.
+- fn déclare une fonction.
+- Les accolades délimitent un bloc. L'accolade ouvrante se met sur la même
+  ligne (convention appliquée par cargo fmt).
+- println! se termine par un point d'exclamation : ce n'est PAS une fonction
+  mais une MACRO (chapitre 16). Les macros génèrent du code à la compilation.
+- Les instructions se terminent par un point-virgule. (Le point-virgule a un
+  rôle important en Rust, voir 4.1 et 5.3.)
+- L'indentation standard est de 4 espaces.
+
+
+1.2 Afficher du texte et des valeurs
+------------------------------------
+   println!("texte");                     texte + retour à la ligne
+   print!("sans retour à la ligne");
+   eprintln!("erreur");                   sur la sortie d'erreur
+
+   let x = 42;
+   let nom = "Alice";
+   println!("x vaut {}", x);              {} est remplacé par la valeur
+   println!("x vaut {x}");                le nom de la variable directement
+   println!("{} a {} ans", nom, x);       plusieurs valeurs, dans l'ordre
+   println!("{0} {1} {0}", "a", "b");     par position : a b a
+
+Les options de formatage :
+   {:?}        affichage de DÉBOGAGE (tableaux, structures...)
+   {:#?}       débogage "joli", sur plusieurs lignes
+   {:5}        largeur minimale de 5 caractères
+   {:<5} {:>5} {:^5}   aligné à gauche, à droite, centré
+   {:05}       complété avec des zéros : 00042
+   {:.2}       2 chiffres après la virgule : 3.14
+   {:x} {:X}   hexadécimal : ff  FF
+   {:#x}       avec préfixe : 0xff
+   {:b}        binaire : 101010
+   {:#010b}    binaire sur 10 caractères avec 0b : 0b00101010
+   {:o}        octal
+   {:e}        notation scientifique
+   {:p}        adresse mémoire (pour une référence ou un pointeur)
+   {{ et }}    afficher une accolade
+
+   let t = [1, 2, 3];
+   println!("{t:?}");                     [1, 2, 3]
+   println!("{:08.3}", 3.14159);          0003.142
+
+
+1.3 Les commentaires
+--------------------
+   // commentaire sur une ligne
+   /* commentaire
+      sur plusieurs lignes */     (ceux-là peuvent s'imbriquer, contrairement
+                                   au C)
+   /// commentaire de DOCUMENTATION de l'élément qui suit (fonction, type...)
+   //! documentation du module ou du fichier qui le contient
+
+Les commentaires /// sont transformés en documentation HTML par cargo doc, et
+les exemples de code qu'ils contiennent sont testés par cargo test.
+
+
+1.4 Les conventions de nommage
+------------------------------
+Le compilateur AVERTIT si tu ne les respectes pas :
+   snake_case             variables, fonctions, modules      nombre_total
+   UpperCamelCase         types, traits, variantes d'enum    MaStructure
+   SCREAMING_SNAKE_CASE   constantes et statiques           TAILLE_MAX
+
+Une variable non utilisée provoque un avertissement. Pour dire que c'est
+voulu, préfixe son nom par _ :   let _inutile = 5;
+
+
+================================================================================
+ 2. VARIABLES ET TYPES DE BASE
+================================================================================
+
+2.1 let : les variables sont immuables par défaut
+-------------------------------------------------
+   let x = 5;
+   x = 6;             // ERREUR : x est immuable
+
+Pour pouvoir modifier une variable, il faut le dire avec mut :
+   let mut y = 5;
+   y = 6;             // OK
+
+C'est un choix de conception : la plupart des variables ne changent jamais, et
+savoir qu'une valeur ne bougera pas rend le code plus facile à lire et à
+vérifier. Le compilateur avertit si tu mets mut sans en avoir besoin.
+
+Une variable DOIT être initialisée avant d'être lue. Le compilateur le
+vérifie : pas de valeur indéterminée comme en C.
+   let z: i32;
+   println!("{z}");   // ERREUR : z n'est pas initialisée
+
+   let w: i32;
+   if condition { w = 1; } else { w = 2; }   // OK : initialisée dans tous
+                                             // les cas
+
+
+2.2 Les annotations de type et l'inférence
+------------------------------------------
+Rust est typé statiquement, mais le compilateur DEVINE le type la plupart du
+temps :
+   let a = 5;            // i32 (entier par défaut)
+   let b = 2.5;          // f64 (flottant par défaut)
+   let c = true;         // bool
+   let d: u8 = 200;      // type précisé explicitement
+   let e = 42u64;        // type donné par un suffixe
+
+Quand le compilateur ne peut pas deviner, il te demande d'annoter.
+
+
+2.3 Le masquage (shadowing)
+---------------------------
+On peut redéclarer une variable du même nom avec let. La nouvelle variable
+cache l'ancienne, et peut même avoir un type différent :
+   let espaces = "   ";          // &str
+   let espaces = espaces.len();  // usize : nouvelle variable, même nom
+
+   let x = 5;
+   {
+       let x = x * 2;            // x vaut 10 dans ce bloc
+       println!("{x}");
+   }
+   println!("{x}");              // x vaut 5
+
+C'est différent de mut : on crée une nouvelle variable, on ne modifie pas
+l'ancienne.
+
+
+2.4 Les constantes : const et static
+------------------------------------
+   const TAILLE_MAX: usize = 1024;
+   static MESSAGE: &str = "bonjour";
+
+const
+   Valeur calculée À LA COMPILATION. Le type est obligatoire. La valeur est
+   recopiée partout où elle est utilisée (comme un #define typé en C).
+   Autorisée partout, même hors des fonctions.
+
+static
+   Une variable globale avec une adresse fixe en mémoire, qui vit pendant tout
+   le programme. Le type est obligatoire.
+   static mut (modifiable) existe, mais le lire ou l'écrire exige unsafe, car
+   plusieurs threads pourraient y accéder en même temps (chapitre 14).
+
+
+2.5 Les types entiers
+---------------------
+   Taille     Signé     Non signé
+   8 bits     i8        u8
+   16 bits    i16       u16
+   32 bits    i32       u32        <- i32 est le type par défaut
+   64 bits    i64       u64
+   128 bits   i128      u128
+   pointeur   isize     usize      (64 bits sur un système 64 bits)
+
+Contrairement au C, les tailles sont FIXES et garanties sur toutes les
+machines. usize est le type des indices et des tailles (équivalent du size_t
+du C).
+
+Plages : i8 va de -128 à 127, u8 de 0 à 255, etc. Chaque type fournit ses
+limites : i32::MIN, i32::MAX, u64::MAX.
+
+
+2.6 Le dépassement d'entier
+---------------------------
+   fn ajouter_un(x: u8) -> u8 {
+       x + 1          // et si x vaut 255 ?
+   }
+
+- En mode DEBUG : le programme s'arrête avec une "panique" : attempt to add
+  with overflow.
+- En mode RELEASE : le calcul "boucle" silencieusement (le résultat vaut 0).
+- Si le compilateur peut voir le problème dès la compilation, il refuse de
+  compiler. Par exemple : let x: u8 = 255; let y = x + 1;
+  donne l'erreur "this arithmetic operation will overflow".
+
+Jamais de comportement indéfini, contrairement au C. Et si tu veux un
+comportement précis, il existe des méthodes explicites :
+   x.wrapping_add(1)       // 0 : boucle toujours
+   x.checked_add(1)        // None : renvoie un Option (chapitre 9)
+   x.saturating_add(1)     // 255 : bloque à la valeur max
+   x.overflowing_add(1)    // (0, true) : résultat + indicateur de dépassement
+
+Il en existe pour chaque opération : wrapping_sub, checked_mul, etc.
+
+
+2.7 Les flottants
+-----------------
+   let a = 2.0;         // f64 (par défaut, 8 octets, double précision)
+   let b: f32 = 3.0;    // f32 (4 octets, simple précision)
+
+Même mise en garde qu'en C : 0.1 + 0.2 == 0.3 est faux. Pour comparer, teste
+si la différence est très petite : (a - b).abs() < 1e-9
+
+Valeurs spéciales : f64::NAN, f64::INFINITY, f64::EPSILON. Diviser un
+flottant par zéro donne l'infini (pas de panique).
+
+Méthodes utiles : x.sqrt(), x.powi(2), x.powf(0.5), x.abs(), x.floor(),
+x.round(), x.min(y), x.max(y). (sqrt, powf, floor et d'autres viennent de std :
+en no_std il faut une bibliothèque comme libm.)
+
+
+2.8 Les booléens
+----------------
+   let vrai = true;
+   let faux: bool = false;
+
+bool occupe 1 octet. DIFFÉRENCE MAJEURE AVEC LE C : un entier n'est PAS un
+booléen. if 1 { } ne compile pas. Il faut écrire if x != 0 { }.
+
+
+2.9 Les caractères
+------------------
+   let c = 'z';
+   let e = 'é';
+   let emoji = '😀';
+   let unicode = '\u{1F600}';     // même emoji, par son code
+
+Un char Rust fait 4 OCTETS et représente un caractère Unicode complet (pas un
+octet comme en C). Pour un octet ASCII, on utilise u8 :
+   let octet = b'A';              // u8 valant 65
+   let octets = b"ABC";           // &[u8; 3] : chaîne d'octets
+
+Échappements : '\n' '\t' '\r' '\\' '\'' '\"' '\0' '\x41' (ASCII seulement)
+
+Conversions :
+   'A' as u32         // 65
+   65u8 as char       // 'A' (seul u8 peut être converti en char avec as)
+   char::from_u32(0x1F600)   // Some('😀')
+   '7'.to_digit(10)          // Some(7)
+
+
+2.10 Le type unité ()
+---------------------
+() se prononce "unit". C'est un type qui n'a qu'une seule valeur, (). Il
+signifie "rien d'intéressant", comme void en C. Une fonction qui ne renvoie
+rien renvoie en fait ().
+
+
+2.11 Les littéraux
+------------------
+   98_222          décimal ; le _ est un séparateur visuel, placé où tu veux
+   0xff            hexadécimal
+   0o77            octal (pas de piège du 0 initial comme en C : 010 vaut 10)
+   0b1111_0000     binaire
+   b'A'            octet (u8)
+   57u8, 1_000i64  suffixe de type
+   1e3, 2.5e-4     flottants en notation scientifique
+   1.0f32          flottant avec suffixe
+
+
+2.12 Les conversions : AUCUNE conversion implicite
+--------------------------------------------------
+Rust ne convertit JAMAIS un type numérique en un autre tout seul :
+   let a: i32 = 5;
+   let b: i64 = a;          // ERREUR : types différents
+   let c = a + 2.5;         // ERREUR : on n'additionne pas i32 et f64
+
+Trois façons de convertir :
+
+1. as : conversion brute, toujours possible, peut perdre de l'information
+      let b = a as i64;
+      let d = 3.9_f64 as i32;       // 3 (partie décimale coupée)
+      let e = 300_i32 as u8;        // 44 (garde les 8 bits du bas)
+      let f = -1_i32 as u32;        // 4294967295
+      let g = 1e20_f64 as i32;      // 2147483647 (sature, jamais d'UB)
+      let h = f64::NAN as i32;      // 0
+
+2. From / into : conversions SANS PERTE uniquement
+      let b = i64::from(a);         // i32 -> i64 : toujours possible
+      let b: i64 = a.into();        // pareil
+      // u8::from(a) ne compile pas : un i32 ne tient pas toujours dans un u8
+
+3. try_from / try_into : conversions qui peuvent échouer (renvoient Result)
+      let petit = u8::try_from(300_i32);   // Err(...)
+      let ok = u8::try_from(200_i32);      // Ok(200)
+
+Règle : préfère From et TryFrom, qui ne perdent jamais d'information en
+silence. Réserve as aux cas où tu veux vraiment tronquer.
+
+
+2.13 Les tuples
+---------------
+Un tuple regroupe des valeurs de types différents, en nombre fixe.
+   let t: (i32, f64, char) = (500, 6.4, 'x');
+   let premier = t.0;              // accès par position : 500
+   let (x, y, z) = t;              // déstructuration : x=500, y=6.4, z='x'
+
+   let paire = (1, "un");
+   let (nombre, _) = paire;        // _ ignore une valeur
+
+Le tuple vide () est le type unité.
+
+
+2.14 Les tableaux (arrays)
+--------------------------
+Un tableau a une taille FIXE, connue à la compilation, et tous ses éléments
+ont le même type. Il est rangé sur la pile.
+   let a: [i32; 5] = [1, 2, 3, 4, 5];   // type : [type; taille]
+   let zeros = [0; 100];                // 100 zéros
+   let premier = a[0];
+   let taille = a.len();                // 5
+
+   let mut b = [0u8; 4];
+   b[2] = 7;
+
+Les indices sont VÉRIFIÉS :
+   fn lire(a: [i32; 5], i: usize) -> i32 {
+       a[i]          // si i >= 5 : PANIQUE à l'exécution, "index out of bounds"
+   }
+Si le compilateur peut calculer l'indice à l'avance (let i = 10; a[i]), il
+refuse carrément de compiler : "this operation will panic at runtime".
+
+Pas de lecture hors du tableau, jamais : c'est une des garanties de Rust.
+Pour accéder sans risque de panique : a.get(i) renvoie Some(&valeur) ou None.
+
+Tableaux à deux dimensions :
+   let grille = [[0; 4]; 3];            // 3 lignes de 4 colonnes
+   let v = grille[1][2];
+
+Pour une taille variable, on utilise Vec (chapitre 10).
+
+
+EXERCICES DU CHAPITRE 2
+-----------------------
+2.1  Affiche la valeur minimale et maximale de i8, u8, i32, u64 et i128,
+     ainsi que la taille de chaque type avec std::mem::size_of::<i32>().
+2.2  Déclare let x: u8 = 250; et affiche le résultat de x + 10 avec
+     wrapping_add, checked_add et saturating_add.
+2.3  Affiche 'A' as u32, 97u8 as char, 3.99_f64 as i32, -5_i32 as u8.
+     Explique chaque résultat.
+
+
+================================================================================
+ 3. LES OPÉRATEURS
+================================================================================
+
+3.1 Opérateurs arithmétiques
+----------------------------
+   a + b    a - b    a * b
+   a / b    division : ENTIÈRE pour les entiers, arrondie vers zéro
+            7 / 2 = 3,  -7 / 2 = -3
+   a % b    reste : 7 % 2 = 1, -7 % 2 = -1 (le signe suit a)
+            Pour un modulo toujours positif : (-7_i32).rem_euclid(2) = 1
+   -a       opposé
+
+Les deux côtés doivent avoir le MÊME type.
+
+Division entière par zéro : PANIQUE (en debug comme en release). Pas de
+comportement indéfini.
+
+Puissance : il n'y a pas d'opérateur. On utilise des méthodes :
+   2_i32.pow(10)       // 1024
+   2.0_f64.powi(3)     // 8.0
+
+Il n'y a PAS de ++ ni de -- en Rust. On écrit x += 1.
+
+
+3.2 Opérateurs de comparaison
+-----------------------------
+   ==  !=  <  >  <=  >=
+Ils renvoient un bool. Les deux côtés doivent avoir le même type :
+   let a: i32 = 5;
+   let b: i64 = 5;
+   a == b                 // ERREUR
+   i64::from(a) == b      // OK
+
+L'enchaînement 0 < x < 10 est refusé à la compilation (contrairement au C
+où il compile mais fait n'importe quoi). Écris : 0 < x && x < 10
+
+Le piège if (x = 5) du C n'existe pas : une affectation renvoie (), qui n'est
+pas un bool, donc ça ne compile pas.
+
+
+3.3 Opérateurs logiques
+-----------------------
+   a && b   ET logique (court-circuit)
+   a || b   OU logique (court-circuit)
+   !a       NON logique
+Uniquement sur des bool.
+
+
+3.4 Opérateurs bit à bit
+------------------------
+   a & b    ET bit à bit
+   a | b    OU bit à bit
+   a ^ b    OU exclusif
+   !a       NON bit à bit (en C c'est ~, qui n'existe pas en Rust)
+   a << n   décalage à gauche
+   a >> n   décalage à droite : logique (des 0 entrent) pour les non signés,
+            arithmétique (le bit de signe est recopié) pour les signés
+
+Manipulations de bits :
+   x |=  1 << n;          // mettre le bit n à 1
+   x &= !(1 << n);        // mettre le bit n à 0
+   x ^=  1 << n;          // inverser le bit n
+   (x >> n) & 1           // lire le bit n
+
+Décaler de trop de bits (1u32 << 32) : panique en debug.
+
+Méthodes très pratiques, sur tous les entiers :
+   x.count_ones()         nombre de bits à 1
+   x.leading_zeros()      nombre de 0 en tête
+   x.trailing_zeros()     nombre de 0 en fin
+   x.rotate_left(n)       rotation de bits
+   x.swap_bytes()         inverse l'ordre des octets
+   x.to_be_bytes()        tableau d'octets en big-endian
+   u32::from_le_bytes(t)  reconstruit depuis des octets little-endian
+   x.is_power_of_two()
+
+
+3.5 Opérateurs d'affectation
+----------------------------
+   =  +=  -=  *=  /=  %=  &=  |=  ^=  <<=  >>=
+
+L'affectation renvoie () : a = b = 0 ne fait pas ce que tu crois en C (le
+compilateur refuse de toute façon car a devrait être de type ()).
+
+
+3.6 Les autres opérateurs et symboles
+-------------------------------------
+   expr as Type       conversion (2.12)
+   &x                 référence partagée vers x          (chapitre 7)
+   &mut x             référence modifiable vers x        (chapitre 7)
+   *r                 déréférencement                    (chapitres 7 et 14)
+   a..b               intervalle de a inclus à b exclu : 0..5 = 0,1,2,3,4
+   a..=b              intervalle inclusif : 0..=5 = 0,1,2,3,4,5
+   ..b   a..   ..     intervalles ouverts (surtout pour les slices)
+   expr?              propage une erreur                 (chapitre 11)
+   x.methode()        appel de méthode, accès à un champ
+   Type::fonction()   chemin : fonction associée, module, variante d'enum
+   t[i]               indexation (vérifiée)
+   |x| x + 1          closure                            (chapitre 13)
+   =>                 dans les match                     (chapitre 9)
+   ->                 type de retour d'une fonction      (chapitre 5)
+   'a                 durée de vie                       (chapitre 7)
+   #[...]             attribut                           (chapitre 16)
+   !                  appel de macro : println!          (chapitre 16)
+
+Il n'y a PAS d'opérateur ternaire ? : en Rust. if est une expression, ce qui
+le remplace (4.1) :
+   let max = if a > b { a } else { b };
+
+
+3.7 La priorité des opérateurs
+------------------------------
+Voir le tableau en annexe 19.2. Même conseil qu'en C : en cas de doute,
+mets des parenthèses. Bonne nouvelle : en Rust, les opérateurs bit à bit
+passent AVANT les comparaisons, donc x & 1 == 0 fait bien (x & 1) == 0.
+
+
+EXERCICES DU CHAPITRE 3
+-----------------------
+3.1  Écris une expression qui dit si une année est bissextile.
+3.2  Soit let mut reg: u8 = 0b0000_0000. Mets les bits 0 et 3 à 1, inverse le
+     bit 7, mets le bit 0 à 0, et affiche le résultat en binaire et en hexa.
+3.3  Affiche -7 / 2, -7 % 2 et (-7_i32).rem_euclid(2). Pourquoi ces résultats ?
+
+
+================================================================================
+ 4. LE CONTRÔLE DU FLUX
+================================================================================
+
+4.1 Instructions et expressions : le rôle du point-virgule
+----------------------------------------------------------
+Notion FONDAMENTALE en Rust :
+   - une EXPRESSION produit une valeur : 5, a + b, un appel de fonction,
+     un bloc { }, un if, un match...
+   - une INSTRUCTION ne produit rien : let x = 5; ou une expression suivie
+     d'un point-virgule.
+
+Un BLOC { } est une expression : sa valeur est celle de sa DERNIÈRE
+expression, si elle n'a PAS de point-virgule.
+
+   let y = {
+       let x = 3;
+       x + 1           // pas de ; : c'est la valeur du bloc
+   };                  // y vaut 4
+
+   let z = {
+       let x = 3;
+       x + 1;          // avec ; : le bloc vaut ()
+   };                  // z vaut ()
+
+Ajouter ou retirer un point-virgule change donc le sens du code. Le
+compilateur te le signale presque toujours.
+
+
+4.2 if / else if / else
+-----------------------
+   if nombre < 0 {
+       println!("négatif");
+   } else if nombre == 0 {
+       println!("zéro");
+   } else {
+       println!("positif");
+   }
+
+- Pas de parenthèses autour de la condition (le compilateur avertit si tu en
+  mets).
+- Les accolades sont OBLIGATOIRES (le piège du if sans accolades du C
+  n'existe pas).
+- La condition doit être un bool : if nombre { } ne compile pas.
+
+if est une EXPRESSION, il remplace l'opérateur ternaire :
+   let parite = if n % 2 == 0 { "pair" } else { "impair" };
+
+Les deux branches doivent alors avoir le même type :
+   let x = if condition { 5 } else { "six" };   // ERREUR
+
+
+4.3 loop : la boucle infinie
+----------------------------
+   loop {
+       println!("encore !");
+   }
+
+On en sort avec break. loop est une expression : break peut renvoyer une
+valeur.
+   let mut compteur = 0;
+   let resultat = loop {
+       compteur += 1;
+       if compteur == 10 {
+           break compteur * 2;     // la boucle vaut 20
+       }
+   };
+
+
+4.4 while
+---------
+   let mut n = 3;
+   while n != 0 {
+       println!("{n}");
+       n -= 1;
+   }
+
+Il n'y a pas de do ... while en Rust. On utilise loop avec un break en fin de
+boucle.
+
+
+4.5 for : parcourir un intervalle ou une collection
+---------------------------------------------------
+Le for de Rust ne ressemble pas à celui du C : il parcourt un ITÉRATEUR
+(chapitre 13).
+
+   for i in 0..5 {              // 0, 1, 2, 3, 4
+       println!("{i}");
+   }
+
+   for i in 1..=10 { }          // 1 à 10 inclus
+   for i in (0..5).rev() { }    // 4, 3, 2, 1, 0
+   for i in (0..20).step_by(5) { }   // 0, 5, 10, 15
+
+   let t = [10, 20, 30];
+   for x in t { }               // parcourt les valeurs
+   for x in &t { }              // parcourt des références (chapitre 7)
+   for (i, x) in t.iter().enumerate() {
+       println!("t[{i}] = {x}");
+   }
+
+Parcourir un tableau par ses indices (for i in 0..t.len()) marche, mais
+parcourir directement les éléments est plus idiomatique, plus sûr et souvent
+plus rapide (pas de vérification d'indice).
+
+
+4.6 break, continue et les étiquettes
+-------------------------------------
+   break      sort de la boucle
+   continue   passe au tour suivant
+
+Pour sortir de plusieurs boucles imbriquées, on nomme la boucle avec une
+étiquette qui commence par une apostrophe. C'est le remplaçant propre du goto
+du C (qui n'existe pas en Rust).
+
+   'exterieur: for i in 0..10 {
+       for j in 0..10 {
+           if i * j == 42 {
+               println!("trouvé : {i} x {j}");
+               break 'exterieur;
+           }
+           if j > i {
+               continue 'exterieur;
+           }
+       }
+   }
+
+
+4.7 match : aperçu
+------------------
+match compare une valeur à une série de MOTIFS (patterns). C'est un switch du
+C en beaucoup plus puissant. Le chapitre 9 le détaille.
+
+   match note {
+       0 => println!("zéro pointé"),
+       1..=9 => println!("insuffisant"),            // intervalle
+       10 | 11 => println!("juste"),                // plusieurs valeurs
+       n if n >= 16 => println!("très bien : {n}"), // garde (condition)
+       _ => println!("correct"),                    // tout le reste
+   }
+
+Différences avec le switch du C :
+- Pas de fall-through : une seule branche est exécutée, pas besoin de break.
+- match doit être EXHAUSTIF : tous les cas possibles doivent être couverts,
+  sinon le code ne compile pas. _ attrape tout ce qui reste.
+- match est une expression :
+     let texte = match n { 1 => "un", 2 => "deux", _ => "beaucoup" };
+- On peut matcher des chaînes, des tuples, des structures, des enums...
+
+
+EXERCICES DU CHAPITRE 4
+-----------------------
+4.1  Affiche la table de multiplication de 1 à 10 sous forme de grille
+     alignée.
+4.2  FizzBuzz de 1 à 100, en utilisant un match sur le tuple (i % 3, i % 5).
+4.3  Avec une boucle loop et break avec valeur, trouve le premier entier n
+     tel que n * n dépasse 5000.
+
+
+================================================================================
+ 5. LES FONCTIONS
+================================================================================
+
+5.1 Définir une fonction
+------------------------
+   fn carre(n: i32) -> i32 {
+       n * n
+   }
+
+   fn saluer(nom: &str) {
+       println!("Salut {nom}");
+   }
+
+   fn main() {
+       let r = carre(7);
+       saluer("Bob");
+   }
+
+- Le type de CHAQUE paramètre est obligatoire.
+- Le type de retour se note après ->. Sans ->, la fonction renvoie ().
+- L'ordre de définition n'a pas d'importance : pas besoin de prototypes comme
+  en C, on peut appeler une fonction définie plus bas dans le fichier.
+
+
+5.2 La valeur de retour
+-----------------------
+La valeur renvoyée est celle de la DERNIÈRE EXPRESSION du corps, sans
+point-virgule (voir 4.1).
+
+   fn plus_un(x: i32) -> i32 {
+       x + 1          // renvoyé
+   }
+
+   fn plus_un_faux(x: i32) -> i32 {
+       x + 1;         // ERREUR : le corps vaut (), pas i32
+   }                  // le compilateur suggère de retirer le ;
+
+return sert à sortir plus tôt :
+   fn valeur_absolue(x: i32) -> i32 {
+       if x < 0 {
+           return -x;
+       }
+       x
+   }
+
+Pour renvoyer plusieurs valeurs, on renvoie un tuple :
+   fn division(a: i32, b: i32) -> (i32, i32) {
+       (a / b, a % b)
+   }
+   let (quotient, reste) = division(17, 5);
+
+
+5.3 Ce qui n'existe pas
+-----------------------
+- Pas de SURCHARGE : deux fonctions ne peuvent pas avoir le même nom avec
+  des paramètres différents (on utilise les traits, chapitre 12).
+- Pas de paramètres par DÉFAUT ni de paramètres NOMMÉS.
+- Pas de fonctions à nombre variable d'arguments (les macros le font :
+  println!).
+
+
+5.4 Le passage des paramètres
+-----------------------------
+Comme en C, les arguments sont passés PAR VALEUR. Mais en Rust, "par valeur"
+signifie soit une COPIE (pour les types simples comme i32), soit un TRANSFERT
+DE POSSESSION (pour les types qui possèdent de la mémoire, comme String).
+C'est tout le sujet du chapitre 6. Pour modifier une variable de l'appelant,
+on passe une référence modifiable &mut (chapitre 7).
+
+
+5.5 Le type ! (never)
+---------------------
+Une fonction qui ne revient JAMAIS a le type de retour ! :
+   fn arreter(message: &str) -> ! {
+       panic!("{message}");        // arrête le programme
+   }
+
+   fn boucle_principale() -> ! {
+       loop {
+           // ...
+       }
+   }
+
+Une expression de type ! peut se mettre là où n'importe quel type est
+attendu, ce qui permet d'écrire :
+   let x: u32 = match texte.parse() {
+       Ok(n) => n,
+       Err(_) => panic!("pas un nombre"),    // type !, accepté comme u32
+   };
+
+
+5.6 Récursivité
+---------------
+   fn factorielle(n: u64) -> u64 {
+       if n <= 1 { 1 } else { n * factorielle(n - 1) }
+   }
+
+Comme en C, chaque appel utilise la pile. Une récursion trop profonde
+provoque un débordement de pile : le programme s'arrête proprement avec le
+message "thread 'main' has overflowed its stack", au lieu d'un plantage
+aléatoire.
+
+
+5.7 Fonctions imbriquées et const fn
+------------------------------------
+On peut définir une fonction dans une fonction (visible seulement dedans).
+
+Une const fn peut être évaluée à la compilation :
+   const fn kilo_octets(n: usize) -> usize {
+       n * 1024
+   }
+   const TAILLE: usize = kilo_octets(4);     // calculé à la compilation
+
+
+EXERCICES DU CHAPITRE 5
+-----------------------
+5.1  Écris fn pgcd(a: u64, b: u64) -> u64, en version boucle puis récursive.
+5.2  Écris fn est_premier(n: u64) -> bool.
+5.3  Écris fn min_max(t: [i32; 5]) -> (i32, i32) qui renvoie le minimum et le
+     maximum d'un tableau.
+
+
+================================================================================
+ 6. LA POSSESSION (OWNERSHIP)
+================================================================================
+
+Ce chapitre et le suivant sont LE cœur de Rust. Tout ce qui rend Rust
+différent du C se trouve ici. Prends ton temps, dessine la pile et le tas sur
+papier, et provoque volontairement les erreurs pour lire les messages du
+compilateur.
+
+
+6.1 Le problème que Rust résout
+-------------------------------
+En C, la mémoire allouée sur le tas se gère à la main : malloc pour réserver,
+free pour libérer. Et les bugs sont nombreux :
+   - oublier free            -> fuite de mémoire
+   - free deux fois          -> corruption du tas
+   - utiliser après free     -> pointeur pendant, faille de sécurité
+   - garder un pointeur vers une variable locale détruite
+
+Les langages comme Java, Python ou Go règlent ça avec un RAMASSE-MIETTES
+(garbage collector) qui libère la mémoire pendant l'exécution. Mais ça coûte
+des performances et des pauses imprévisibles, ce qui est inacceptable dans un
+noyau ou un système temps réel.
+
+Rust choisit une troisième voie : des règles de POSSESSION vérifiées À LA
+COMPILATION. La mémoire est libérée automatiquement au bon moment, sans
+ramasse-miettes, et le compilateur refuse tout code qui pourrait mal utiliser
+la mémoire. Coût à l'exécution : zéro.
+
+
+6.2 Rappel : la pile et le tas
+------------------------------
+PILE (stack)
+   Les variables locales et les paramètres. Réservation et libération
+   instantanées (on déplace juste le pointeur de pile, rsp). La taille de
+   chaque donnée doit être connue à la compilation. Les données disparaissent
+   à la fin de la fonction.
+
+TAS (heap)
+   Pour les données dont la taille est inconnue à la compilation ou qui
+   doivent survivre à la fonction. On demande de la place à l'allocateur, qui
+   renvoie une adresse. Plus lent, et il faut penser à rendre la mémoire.
+
+En Rust : i32, f64, bool, char, les tableaux [T; N], les tuples de ces types
+vont sur la pile. String, Vec, Box ont une petite partie sur la pile qui
+pointe vers leurs données sur le tas.
+
+
+6.3 String : un type qui possède de la mémoire
+----------------------------------------------
+   let s = String::from("bonjour");
+
+Ce que ça donne en mémoire :
+
+        PILE (variable s)                    TAS
+      +-----------+----------+
+      | pointeur  |  -----------------> +---+---+---+---+---+---+---+
+      +-----------+----------+          | b | o | n | j | o | u | r |
+      | longueur  |    7     |          +---+---+---+---+---+---+---+
+      +-----------+----------+
+      | capacité  |    7     |
+      +-----------+----------+
+         24 octets sur la pile           7 octets sur le tas
+
+Une String est donc une structure de 3 champs (pointeur, longueur, capacité)
+qui POSSÈDE un bloc de mémoire sur le tas. La chaîne est modifiable et peut
+grandir :
+   let mut s = String::from("bon");
+   s.push_str("jour");        // peut réallouer un bloc plus grand
+
+Ne pas confondre avec "bonjour" tout court, qui est de type &str : une
+référence vers un texte rangé dans l'exécutable, en lecture seule (7.7).
+
+
+6.4 Les trois règles de la possession
+-------------------------------------
+   1. Chaque valeur a UN SEUL propriétaire (une variable).
+   2. Il ne peut y avoir qu'un seul propriétaire à la fois.
+   3. Quand le propriétaire sort de sa portée, la valeur est DÉTRUITE et sa
+      mémoire libérée.
+
+   {
+       let s = String::from("salut");   // s possède la chaîne
+       // on utilise s
+   }                                    // fin de portée : Rust appelle
+                                        // automatiquement drop, le tas est
+                                        // libéré
+
+C'est l'équivalent d'un free placé automatiquement au bon endroit, que tu ne
+peux ni oublier ni appeler deux fois.
+
+
+6.5 Le déplacement (move)
+-------------------------
+   let s1 = String::from("salut");
+   let s2 = s1;
+
+Que se passe-t-il ? Seuls les 24 octets de la pile sont copiés, PAS les
+données du tas :
+
+      s1 : [ptr | 5 | 5] ----+
+                             +----> [s][a][l][u][t]
+      s2 : [ptr | 5 | 5] ----+
+
+Deux variables pointeraient sur le même bloc. À la fin de la portée, les deux
+seraient libérées : DOUBLE LIBÉRATION, le bug classique du C.
+
+La solution de Rust : après let s2 = s1, la possession est DÉPLACÉE (moved)
+vers s2, et s1 devient INUTILISABLE.
+
+   let s1 = String::from("salut");
+   let s2 = s1;
+   println!("{s1}");      // ERREUR E0382 : borrow of moved value: `s1`
+
+Le compilateur affiche :
+   error[E0382]: borrow of moved value: `s1`
+     |
+   2 |     let s1 = String::from("salut");
+     |         -- move occurs because `s1` has type `String`, which does not
+     |            implement the `Copy` trait
+   3 |     let s2 = s1;
+     |              -- value moved here
+   4 |     println!("{s1}");
+     |                ^^ value borrowed here after move
+     |
+   help: consider cloning the value if the performance cost is acceptable
+     |
+   3 |     let s2 = s1.clone();
+     |                ++++++++
+
+Remarque : le compilateur propose même la correction (voir 6.6).
+Seul s2 sera libéré à la fin : pas de double libération possible.
+
+On peut réutiliser une variable déplacée en lui redonnant une valeur :
+   let mut s = String::from("a");
+   let t = s;
+   s = String::from("b");     // OK : s possède une nouvelle valeur
+
+
+6.6 clone : la copie profonde
+-----------------------------
+Si tu veux vraiment deux chaînes indépendantes, il faut le demander :
+   let s1 = String::from("salut");
+   let s2 = s1.clone();       // copie aussi les données du tas
+   println!("{s1} {s2}");     // OK, deux blocs distincts
+
+      s1 : [ptr | 5 | 5] ----> [s][a][l][u][t]
+      s2 : [ptr | 5 | 5] ----> [s][a][l][u][t]
+
+clone est explicite exprès : quand tu le vois, tu sais qu'une copie
+potentiellement coûteuse a lieu.
+
+
+6.7 Copy : les types copiés automatiquement
+-------------------------------------------
+   let x = 5;
+   let y = x;
+   println!("{x} {y}");       // OK ! x est toujours utilisable
+
+Pour les types entièrement rangés sur la pile et sans ressource à libérer,
+copier est trivial et sans danger. Ils implémentent le trait Copy : une
+affectation les COPIE au lieu de les déplacer.
+
+Types Copy :
+   - tous les entiers, flottants, bool, char
+   - les références partagées &T (chapitre 7)
+   - les pointeurs bruts et les pointeurs de fonction
+   - les tuples et tableaux dont tous les éléments sont Copy
+
+Types NON Copy (donc déplacés) :
+   - String, Vec, Box et tout ce qui possède de la mémoire sur le tas
+   - les références modifiables &mut T
+   - tout type qui implémente Drop (6.8)
+
+Tes propres types peuvent devenir Copy avec #[derive(Clone, Copy)]
+(chapitre 12) s'ils ne contiennent que des champs Copy.
+
+
+6.8 Drop : la destruction automatique
+-------------------------------------
+Quand une valeur sort de portée, Rust appelle son "destructeur" (le trait
+Drop). Pour une String, il libère le tas. On peut écrire le sien :
+
+   struct Ressource {
+       nom: String,
+   }
+
+   impl Drop for Ressource {
+       fn drop(&mut self) {
+           println!("libération de {}", self.nom);
+       }
+   }
+
+   fn main() {
+       let _a = Ressource { nom: String::from("A") };
+       let _b = Ressource { nom: String::from("B") };
+       println!("fin de main");
+   }
+   // Affiche :
+   //   fin de main
+   //   libération de B      <- détruites dans l'ordre INVERSE de création
+   //   libération de A
+
+Ce principe s'appelle RAII : une ressource (mémoire, fichier ouvert, verrou)
+est liée à la durée de vie d'une variable. Un fichier se ferme tout seul, un
+verrou se relâche tout seul.
+
+Pour détruire une valeur avant la fin de sa portée : drop(valeur);
+(drop est une fonction ordinaire qui prend possession de la valeur et... ne
+fait rien. La valeur est détruite à la fin de drop, puisque drop la possède.)
+
+On ne peut pas appeler valeur.drop() directement : le compilateur l'interdit,
+pour éviter une double destruction.
+
+
+6.9 La possession et les fonctions
+----------------------------------
+Passer une valeur à une fonction la DÉPLACE (ou la copie si elle est Copy),
+exactement comme une affectation.
+
+   fn prendre(s: String) {
+       println!("{s}");
+   }                               // s est détruite ici
+
+   fn copier(n: i32) {
+       println!("{n}");
+   }
+
+   fn main() {
+       let texte = String::from("salut");
+       prendre(texte);             // texte est DÉPLACÉ dans la fonction
+       // println!("{texte}");     // ERREUR : texte a été déplacé
+
+       let nombre = 5;
+       copier(nombre);             // i32 est Copy
+       println!("{nombre}");       // OK
+   }
+
+Renvoyer une valeur transfère la possession à l'appelant :
+   fn creer() -> String {
+       let s = String::from("neuf");
+       s                           // la possession sort de la fonction
+   }
+
+   fn prendre_et_rendre(s: String) -> String {
+       s
+   }
+
+Passer une valeur puis la récupérer à chaque fois serait très pénible. Pour
+UTILISER une valeur sans en prendre possession, on l'EMPRUNTE : c'est le
+chapitre 7.
+
+
+6.10 Déplacements dans les boucles et les structures
+----------------------------------------------------
+   let v = vec![String::from("a"), String::from("b")];
+
+   for s in &v { }       // version qui EMPRUNTE (7.9) : v reste utilisable
+
+   for s in v {          // la boucle PREND POSSESSION de v et de chaque String
+       println!("{s}");
+   }
+   // v n'est plus utilisable ici
+
+(vec![...] crée un Vec, un tableau de taille variable : chapitre 10.)
+
+On ne peut pas "sortir" un élément d'un tableau ou d'un Vec par indexation,
+car ça laisserait un trou :
+   let mut v = vec![String::from("a"), String::from("b")];
+   let premier = v[0];               // ERREUR E0507 : cannot move out of index
+   let premier = &v[0];              // OK : on emprunte
+   let premier = v[0].clone();       // OK : on copie
+   let premier = std::mem::take(&mut v[0]);   // OK : on prend et on laisse
+                                              // une String vide à la place
+
+
+6.11 Comparaison avec le C
+--------------------------
+   C                                  Rust
+   ---------------------------------  ----------------------------------------
+   char *s = malloc(8);               let s = String::with_capacity(8);
+   free(s);                           automatique en fin de portée
+   oubli de free -> fuite             impossible par accident (sauf cas
+                                      volontaires : mem::forget, Box::leak,
+                                      cycles de Rc)
+   double free -> corruption          impossible : un seul propriétaire
+   utilisation après free             refusé à la compilation (move)
+   p2 = p1 : deux pointeurs, qui      let s2 = s1 : s1 devient inutilisable
+   libère ?
+   copie profonde : memcpy à la main  s.clone()
+
+
+EXERCICES DU CHAPITRE 6
+-----------------------
+6.1  Écris un programme qui déplace une String dans une fonction, puis essaie
+     de l'utiliser. Lis l'erreur. Corrige de deux façons : avec clone, puis
+     en faisant renvoyer la String par la fonction.
+6.2  Crée une structure avec un Drop qui affiche un message. Crée trois
+     variables de ce type dans des blocs imbriqués et prédis l'ordre des
+     messages avant d'exécuter.
+6.3  Pour chaque ligne, dis si c'est une copie ou un déplacement, et si la
+     variable d'origine reste utilisable :
+        let a = 5;              let b = a;
+        let c = (1, 2.0);       let d = c;
+        let e = [1, 2, 3];      let f = e;
+        let g = String::new();  let h = g;
+        let i = (1, String::new());  let j = i;
+
+
+================================================================================
+ 7. LES RÉFÉRENCES, LES EMPRUNTS ET LES DURÉES DE VIE
+================================================================================
+
+7.1 Emprunter avec &
+--------------------
+Une RÉFÉRENCE permet d'accéder à une valeur SANS en prendre possession. On dit
+qu'on l'EMPRUNTE.
+
+   fn longueur(s: &String) -> usize {    // &String : référence vers une String
+       s.len()
+   }                                     // s est une référence : rien n'est
+                                         // détruit ici
+
+   fn main() {
+       let texte = String::from("salut");
+       let n = longueur(&texte);         // &texte : on prête texte
+       println!("{texte} fait {n} octets");   // texte est toujours à nous
+   }
+
+En mémoire :
+
+      r : [ adresse ] ---> texte : [ptr | 5 | 5] ---> [s][a][l][u][t]
+      (dans longueur)      (dans main)
+
+Une référence est, à l'exécution, un simple pointeur : une adresse, comme en
+C. Toute la différence est dans les RÈGLES que le compilateur vérifie.
+
+Une référence & est en lecture seule :
+   fn modifier(s: &String) {
+       s.push_str("!");      // ERREUR : on ne peut pas modifier via &
+   }
+
+
+7.2 Les références modifiables &mut
+-----------------------------------
+   fn ajouter_point(s: &mut String) {
+       s.push('!');
+   }
+
+   fn main() {
+       let mut texte = String::from("salut");   // la variable doit être mut
+       ajouter_point(&mut texte);               // on prête en modification
+       println!("{texte}");                     // salut!
+   }
+
+Pour un entier, il faut déréférencer avec * pour modifier la valeur pointée :
+   fn doubler(x: &mut i32) {
+       *x *= 2;
+   }
+
+   let mut n = 21;
+   doubler(&mut n);        // n vaut 42
+
+Et l'échange de deux variables, l'exemple classique des pointeurs en C :
+   fn echanger(a: &mut i32, b: &mut i32) {
+       let tmp = *a;
+       *a = *b;
+       *b = tmp;
+   }
+   (La bibliothèque fournit std::mem::swap(&mut x, &mut y), qui marche pour
+    tous les types.)
+
+
+7.3 LA RÈGLE D'OR DES EMPRUNTS
+------------------------------
+À tout moment, pour une valeur donnée, tu peux avoir :
+
+      SOIT autant de références partagées &T que tu veux
+      SOIT UNE SEULE référence modifiable &mut T
+
+      mais JAMAIS les deux en même temps.
+
+Et une référence ne peut jamais vivre plus longtemps que la valeur qu'elle
+désigne.
+
+   let mut s = String::from("a");
+
+   let r1 = &s;
+   let r2 = &s;             // OK : plusieurs lecteurs
+   println!("{r1} {r2}");
+
+   let m1 = &mut s;
+   let m2 = &mut s;         // ERREUR E0499 : deux &mut en même temps
+   m1.push('b');
+
+   let r = &s;
+   let m = &mut s;          // ERREUR E0502 : & et &mut en même temps
+   println!("{r}");
+
+Pourquoi cette règle ? Elle élimine des catégories entières de bugs.
+
+Exemple 1 : l'invalidation. Un Vec peut réallouer ses données quand il grandit.
+   let mut v = vec![1, 2, 3];
+   let premier = &v[0];     // pointe dans le bloc du tas
+   v.push(4);               // ERREUR : push peut déplacer le bloc...
+   println!("{premier}");   // ...et premier pointerait dans le vide
+En C, ce code compile et donne un pointeur pendant. En Rust, il ne compile pas.
+
+Exemple 2 : les accès concurrents. Si deux threads pouvaient modifier la même
+donnée en même temps, le résultat serait imprévisible (data race). La règle
+"un seul &mut" rend ça impossible (chapitre 17).
+
+Exemple 3 : les optimisations. Comme une &mut est garantie unique, le
+compilateur sait qu'aucun autre pointeur ne modifie la donnée : c'est ce que
+restrict promet en C, mais vérifié et appliqué partout.
+
+
+7.4 Un emprunt dure jusqu'à sa dernière utilisation
+---------------------------------------------------
+Le compilateur ne regarde pas la fin du bloc, mais la DERNIÈRE UTILISATION de
+la référence :
+
+   let mut s = String::from("a");
+   let r = &s;
+   println!("{r}");         // dernière utilisation de r : l'emprunt se termine
+   let m = &mut s;          // OK
+   m.push('b');
+
+
+7.5 Pas de référence pendante
+-----------------------------
+En C, renvoyer l'adresse d'une variable locale compile (avec un
+avertissement). En Rust :
+
+   fn pendante() -> &String {
+       let s = String::from("a");
+       &s
+   }
+   // ERREUR E0106 : missing lifetime specifier
+   // Le compilateur explique : la fonction renvoie une référence, mais il n'y
+   // a aucune valeur empruntée d'où elle pourrait venir.
+
+   fn pendante2(x: &i32) -> &i32 {
+       let local = 5;
+       &local
+   }
+   // ERREUR E0515 : cannot return reference to local variable `local`
+
+Solution : renvoyer la valeur elle-même (déplacement) :
+   fn pas_pendante() -> String {
+       String::from("a")
+   }
+
+Même chose avec une portée de bloc :
+   let r;
+   {
+       let x = 5;
+       r = &x;              // ERREUR E0597 : `x` does not live long enough
+   }
+   println!("{r}");
+
+
+7.6 Déréférencement et auto-déréférencement
+-------------------------------------------
+   let x = 5;
+   let r = &x;
+   let rr = &r;             // référence vers une référence : &&i32
+
+   *r                       // 5
+   **rr                     // 5
+   *r == 5                  // true
+   r == 5                   // ERREUR : on ne compare pas &i32 et i32
+   r == &5                  // OK
+
+Rust déréférence automatiquement dans plusieurs cas, ce qui rend le code
+léger :
+   - les appels de méthode : r.len() fonctionne que r soit une String, une
+     &String ou une &&String (plus besoin de -> comme en C) ;
+   - l'accès aux champs : r.champ ;
+   - l'affichage : println!("{r}") affiche la valeur, pas l'adresse.
+
+Pour voir l'adresse : println!("{:p}", r);
+
+L'opérateur & crée une référence, * la suit. Comme en C : &x donne l'adresse,
+*r donne la valeur.
+
+
+7.7 Les slices : emprunter une partie
+-------------------------------------
+Une SLICE est une référence vers une suite contiguë d'éléments. Elle est
+composée de DEUX mots : un pointeur et une longueur (on parle de "pointeur
+large", fat pointer). C'est ce qui manque cruellement au C, où un tableau
+passé à une fonction perd sa taille.
+
+   let t = [10, 20, 30, 40, 50];
+   let tout: &[i32] = &t;           // slice de tout le tableau
+   let milieu = &t[1..4];           // [20, 30, 40]
+   let debut = &t[..2];             // [10, 20]
+   let fin = &t[3..];               // [40, 50]
+
+   milieu : [ ptr | 3 ]
+               |
+               v
+   t :   [10][20][30][40][50]
+
+   milieu.len()      // 3 : la taille voyage avec la slice
+   milieu[0]         // 20, indice vérifié
+
+Une fonction qui prend &[i32] accepte un tableau, un Vec, ou un morceau de
+l'un ou l'autre :
+   fn somme(t: &[i32]) -> i32 {
+       let mut total = 0;
+       for x in t {
+           total += x;
+       }
+       total
+   }
+
+   somme(&t);                 // tableau entier
+   somme(&t[1..3]);           // partie
+   somme(&vec![1, 2, 3]);     // Vec
+
+Slice modifiable :
+   fn mettre_a_zero(t: &mut [i32]) {
+       for x in t.iter_mut() {
+           *x = 0;
+       }
+   }
+   mettre_a_zero(&mut tableau[2..]);
+
+LES SLICES DE CHAÎNE : &str
+   &str est une slice d'octets garantis en UTF-8 valide.
+   let s = String::from("bonjour tout le monde");
+   let mot: &str = &s[0..7];        // "bonjour"
+
+   Les littéraux "..." sont des &str (plus précisément &'static str, 7.8).
+
+   ATTENTION : les indices sont en OCTETS, pas en caractères. Couper au milieu
+   d'un caractère multi-octets provoque une panique :
+      let e = "été";               // é fait 2 octets
+      let x = &e[0..1];            // PANIQUE : pas une frontière de caractère
+
+   Règle pratique pour les paramètres : prends &str plutôt que &String, et
+   &[T] plutôt que &Vec<T>. Grâce à la "coercition de déréférencement", une
+   &String se convertit automatiquement en &str, et une &Vec<T> en &[T]. La
+   fonction accepte alors plus de choses.
+
+   fn premier_mot(s: &str) -> &str {
+       for (i, octet) in s.bytes().enumerate() {
+           if octet == b' ' {
+               return &s[..i];
+           }
+       }
+       s
+   }
+
+   let phrase = String::from("salut le monde");
+   let mot = premier_mot(&phrase);       // &String -> &str automatiquement
+   // phrase.clear();                    // ERREUR : mot emprunte encore phrase
+   println!("{mot}");
+
+
+7.8 Les durées de vie (lifetimes)
+---------------------------------
+Chaque référence a une DURÉE DE VIE : la portion de code pendant laquelle elle
+est valide. La plupart du temps, le compilateur la déduit seul. Parfois, il a
+besoin qu'on la précise.
+
+Le problème :
+   fn plus_long(a: &str, b: &str) -> &str {
+       if a.len() > b.len() { a } else { b }
+   }
+   // ERREUR E0106 : missing lifetime specifier
+
+Le compilateur ne sait pas si la référence renvoyée vient de a ou de b, donc
+il ne peut pas vérifier combien de temps elle reste valide pour l'appelant.
+
+La solution : une ANNOTATION DE DURÉE DE VIE. Elle commence par une apostrophe,
+et se déclare entre < > comme un paramètre générique :
+
+   fn plus_long<'a>(a: &'a str, b: &'a str) -> &'a str {
+       if a.len() > b.len() { a } else { b }
+   }
+
+Ça se lit : "il existe une durée 'a pendant laquelle a et b sont valides ; le
+résultat est valide pendant cette même durée". En pratique, 'a devient la plus
+COURTE des deux durées de vie.
+
+   let s1 = String::from("longue chaîne");
+   let resultat;
+   {
+       let s2 = String::from("court");
+       resultat = plus_long(&s1, &s2);
+       println!("{resultat}");      // OK : s1 et s2 vivent encore
+   }
+   // println!("{resultat}");       // ERREUR : s2 est détruite, et resultat
+                                    // pourrait pointer dessus
+
+IMPORTANT : une annotation ne CHANGE PAS la durée de vie de quoi que ce soit.
+Elle DÉCRIT des relations entre références pour que le compilateur puisse les
+vérifier.
+
+Les règles d'élision (quand on n'a pas besoin d'annoter) :
+   1. Chaque paramètre référence reçoit sa propre durée de vie.
+   2. S'il n'y a qu'UN paramètre référence, le résultat reçoit sa durée de vie.
+        fn premier_mot(s: &str) -> &str      // pas d'annotation nécessaire
+   3. Pour une méthode avec &self ou &mut self, le résultat reçoit la durée de
+      vie de self.
+Si ces règles ne suffisent pas, le compilateur demande une annotation.
+
+Une structure qui CONTIENT une référence doit déclarer sa durée de vie :
+   struct Extrait<'a> {
+       texte: &'a str,
+   }
+   // Une instance d'Extrait ne peut pas vivre plus longtemps que le texte
+   // qu'elle emprunte.
+
+La durée de vie spéciale 'static : la référence est valide pendant TOUT le
+programme. Les littéraux de chaîne sont des &'static str, car ils sont
+rangés dans l'exécutable.
+   let s: &'static str = "je vis pour toujours";
+
+Quand le compilateur suggère d'ajouter 'static, c'est rarement la bonne
+solution : le vrai problème est souvent qu'une valeur est détruite trop tôt,
+ou qu'il faudrait renvoyer une valeur possédée (String) plutôt qu'une
+référence.
+
+
+7.9 Emprunter dans les boucles
+------------------------------
+   let mut v = vec![1, 2, 3];
+
+   for x in &v {           // x : &i32         (équivaut à v.iter())
+       println!("{x}");
+   }
+
+   for x in &mut v {       // x : &mut i32     (équivaut à v.iter_mut())
+       *x *= 10;
+   }
+
+   for x in v {            // x : i32, v est consommé (into_iter())
+       println!("{x}");
+   }
+
+Modifier la collection pendant qu'on la parcourt est refusé (même raison que
+l'exemple de push en 7.3).
+
+
+7.10 Contourner la règle d'or proprement
+----------------------------------------
+Parfois on a besoin de deux &mut vers deux parties DIFFÉRENTES :
+   let mut t = [1, 2, 3, 4];
+   let a = &mut t[0];
+   let b = &mut t[1];      // ERREUR E0499 : le compilateur ne distingue pas
+   *a += *b;               // les indices, il voit deux &mut sur t
+
+   let (gauche, droite) = t.split_at_mut(2);   // OK : deux slices disjointes
+   gauche[0] = droite[0];
+
+   t.swap(0, 3);           // échanger deux éléments
+
+Pour des champs différents d'une même structure, pas de problème :
+   let a = &mut point.x;
+   let b = &mut point.y;   // OK : le compilateur voit que ce sont des champs
+   *a += *b;               // distincts
+
+Remplacer une valeur derrière une &mut sans la copier :
+   std::mem::swap(&mut a, &mut b)           échange
+   std::mem::replace(&mut a, nouvelle)      remplace et renvoie l'ancienne
+   std::mem::take(&mut a)                   prend et laisse la valeur par
+                                            défaut (String vide, 0, None...)
+
+
+7.11 Récapitulatif
+------------------
+   Écriture   Nom                     Possède ?  Modifie ?  Combien à la fois ?
+   --------   ---------------------   ---------  ---------  -------------------
+   T          valeur possédée         oui        si mut     un propriétaire
+   &T         référence partagée      non        non        autant qu'on veut
+   &mut T     référence modifiable    non        oui        UNE seule
+   &[T]       slice partagée          non        non        autant qu'on veut
+   &mut [T]   slice modifiable        non        oui        une seule
+   &str       slice de chaîne         non        non        autant qu'on veut
+
+Pour choisir le type d'un paramètre :
+   - la fonction lit seulement              -> &T  (ou &str, &[T])
+   - la fonction modifie                    -> &mut T
+   - la fonction garde la valeur pour elle  -> T
+
+
+7.12 Les erreurs du borrow checker et comment les corriger
+----------------------------------------------------------
+E0382  use of moved value
+       Tu utilises une variable après l'avoir déplacée.
+       -> emprunte (&) au lieu de déplacer, ou clone, ou réorganise le code.
+
+E0499  cannot borrow as mutable more than once at a time
+       Deux &mut actives en même temps.
+       -> termine le premier emprunt avant le second, ou split_at_mut.
+
+E0502  cannot borrow as mutable because it is also borrowed as immutable
+       Une & est encore utilisée plus loin pendant que tu prends une &mut.
+       -> utilise la & avant, ou copie la valeur dont tu as besoin
+          (let premier = v[0]; au lieu de let premier = &v[0];).
+
+E0506  cannot assign to `x` because it is borrowed
+       Tu modifies une variable pendant qu'une référence vers elle existe.
+
+E0597  `x` does not live long enough
+       La référence survit à la valeur.
+       -> déclare la valeur dans une portée plus large, ou possède la donnée.
+
+E0106  missing lifetime specifier
+       Le compilateur ne sait pas d'où vient la référence renvoyée.
+       -> ajoute une annotation 'a, ou renvoie une valeur possédée.
+
+E0515  cannot return reference to local variable
+       -> renvoie la valeur elle-même.
+
+E0596  cannot borrow as mutable, as it is not declared as mutable
+       -> ajoute mut à la déclaration de la variable.
+
+Conseil : ne cherche pas à "gagner" contre le borrow checker à coups de clone
+partout. Quand il refuse, demande-toi quel bug il vient de t'éviter.
+
+
+EXERCICES DU CHAPITRE 7
+-----------------------
+7.1  Écris fn min_max(t: &[i32]) -> (i32, i32) et appelle-la sur un tableau
+     entier puis sur une partie de tableau.
+7.2  Écris fn inverser(t: &mut [i32]) qui inverse une slice sur place, sans
+     utiliser la méthode reverse (utilise swap ou deux indices).
+7.3  Écris fn plus_grand<'a>(t: &'a [i32]) -> &'a i32 qui renvoie une
+     référence vers le plus grand élément.
+7.4  Écris fn est_palindrome(s: &str) -> bool (en comparant les caractères
+     avec s.chars() et s.chars().rev()).
+7.5  Explique pourquoi ce code ne compile pas, puis corrige-le :
+        let mut v = vec![1, 2, 3];
+        for x in &v {
+            if *x == 2 {
+                v.push(4);
+            }
+        }
+7.6  Écris struct Tokeniseur<'a> { reste: &'a str } avec une méthode
+     fn suivant(&mut self) -> Option<&'a str> qui renvoie le mot suivant
+     (séparé par des espaces) ou None. (À faire après le chapitre 9.)
+
+
+================================================================================
+ 8. LES STRUCTURES ET LES MÉTHODES
+================================================================================
+
+8.1 Définir et utiliser une structure
+-------------------------------------
+   struct Personne {
+       nom: String,
+       age: u32,
+       actif: bool,
+   }
+
+   let mut p = Personne {
+       nom: String::from("Alice"),
+       age: 30,
+       actif: true,
+   };
+
+   p.age += 1;                  // accès avec le point
+   println!("{} a {} ans", p.nom, p.age);
+
+- Pas de point-virgule après l'accolade de la définition.
+- Tous les champs doivent être initialisés.
+- On ne peut pas rendre UN champ mutable : c'est toute la variable qui l'est
+  (let mut p).
+- La structure POSSÈDE ses champs : quand p est détruite, p.nom l'est aussi.
+
+
+8.2 Raccourcis de construction
+------------------------------
+Si une variable a le même nom qu'un champ :
+   fn creer(nom: String, age: u32) -> Personne {
+       Personne { nom, age, actif: true }     // au lieu de nom: nom, age: age
+   }
+
+Syntaxe de mise à jour, à partir d'une autre instance :
+   let p2 = Personne {
+       nom: String::from("Bob"),
+       ..p                       // les autres champs viennent de p
+   };
+ATTENTION : les champs non Copy repris de p sont DÉPLACÉS. Ici seuls age et
+actif (Copy) sont repris, donc p reste utilisable. Si nom avait été repris, p
+serait partiellement déplacée.
+
+
+8.3 Structures tuples et structures unités
+------------------------------------------
+Structure TUPLE : champs sans nom, accès par position.
+   struct Couleur(u8, u8, u8);
+   struct Metres(f64);            // "newtype" : un type distinct autour d'un f64
+
+   let noir = Couleur(0, 0, 0);
+   let rouge = noir.0;
+   let d = Metres(5.0);
+
+Le newtype est très utile : Metres et Secondes sont deux types différents,
+impossible de les additionner par erreur, alors que ce sont deux f64.
+
+Structure UNITÉ : aucun champ. Sert à implémenter des traits (chapitre 12).
+   struct Marqueur;
+
+
+8.4 Afficher une structure
+--------------------------
+println!("{p}") ne marche pas : Rust ne sait pas comment afficher ton type.
+Pour l'affichage de débogage, on demande au compilateur de le générer :
+   #[derive(Debug)]
+   struct Point {
+       x: i32,
+       y: i32,
+   }
+
+   let pt = Point { x: 1, y: 2 };
+   println!("{pt:?}");       // Point { x: 1, y: 2 }
+   println!("{pt:#?}");      // version sur plusieurs lignes
+   dbg!(&pt);                // affiche fichier, ligne, expression et valeur
+
+Pour un affichage "propre" avec {}, il faut implémenter le trait Display
+(12.6).
+
+
+8.5 Les méthodes : impl
+-----------------------
+On attache des fonctions à un type dans un bloc impl :
+
+   #[derive(Debug)]
+   struct Rectangle {
+       largeur: u32,
+       hauteur: u32,
+   }
+
+   impl Rectangle {
+       // FONCTION ASSOCIÉE (pas de self) : un "constructeur"
+       fn new(largeur: u32, hauteur: u32) -> Self {
+           Self { largeur, hauteur }         // Self = Rectangle
+       }
+
+       fn carre(cote: u32) -> Self {
+           Self { largeur: cote, hauteur: cote }
+       }
+
+       // MÉTHODE qui LIT : &self
+       fn aire(&self) -> u32 {
+           self.largeur * self.hauteur
+       }
+
+       // MÉTHODE qui MODIFIE : &mut self
+       fn agrandir(&mut self, facteur: u32) {
+           self.largeur *= facteur;
+           self.hauteur *= facteur;
+       }
+
+       // MÉTHODE qui CONSOMME : self
+       fn en_tuple(self) -> (u32, u32) {
+           (self.largeur, self.hauteur)
+       }
+
+       fn peut_contenir(&self, autre: &Rectangle) -> bool {
+           self.largeur >= autre.largeur && self.hauteur >= autre.hauteur
+       }
+   }
+
+   fn main() {
+       let mut r = Rectangle::new(10, 5);   // fonction associée : Type::nom
+       println!("{}", r.aire());            // méthode : valeur.nom()
+       r.agrandir(2);
+       let petit = Rectangle::carre(3);
+       println!("{}", r.peut_contenir(&petit));
+       let (l, h) = r.en_tuple();           // r est consommé
+   }
+
+Les trois formes de self suivent exactement les règles du chapitre 7 :
+   &self       emprunte en lecture         (le cas le plus courant)
+   &mut self   emprunte en modification
+   self        prend possession            (la valeur est consommée)
+
+Rust ajoute automatiquement &, &mut ou * à l'appel : r.aire() est traduit en
+Rectangle::aire(&r). C'est pour ça qu'il n'y a pas d'opérateur -> comme en C.
+
+Il n'y a pas de constructeur spécial : new est une simple convention.
+On peut avoir plusieurs blocs impl pour le même type.
+
+
+8.6 Déstructurer une structure
+------------------------------
+   let Point { x, y } = pt;              // crée x et y
+   let Point { x: a, y: b } = pt;        // avec d'autres noms
+   let Point { x, .. } = pt;             // ignore les autres champs
+
+   fn afficher(&Point { x, y }: &Point) {
+       println!("({x}, {y})");
+   }
+
+
+8.7 La structure en mémoire
+---------------------------
+Contrairement au C, Rust NE GARANTIT PAS l'ordre des champs en mémoire : le
+compilateur peut les réorganiser pour réduire le remplissage.
+   std::mem::size_of::<Rectangle>()      // 8
+   std::mem::align_of::<u64>()           // 8
+
+Pour avoir la disposition du C (obligatoire pour échanger avec du C, de
+l'assembleur ou du matériel) :
+   #[repr(C)]
+   struct EnteteC {
+       a: u8,
+       b: u32,
+   }
+Et #[repr(C, packed)] supprime le remplissage (accéder aux champs par
+référence devient alors dangereux, le compilateur t'en empêche).
+
+
+EXERCICES DU CHAPITRE 8
+-----------------------
+8.1  Crée une structure Compte { titulaire: String, solde: i64 } avec new,
+     deposer(&mut self, montant), retirer(&mut self, montant) -> bool (refuse
+     si le solde est insuffisant) et afficher(&self).
+8.2  Crée une structure Point { x: f64, y: f64 } avec une méthode distance
+     vers un autre point.
+8.3  Crée deux newtypes Celsius(f64) et Fahrenheit(f64) et des fonctions de
+     conversion. Vérifie que le compilateur refuse de passer l'un à la place
+     de l'autre.
+
+
+================================================================================
+ 9. LES ÉNUMÉRATIONS ET LE PATTERN MATCHING
+================================================================================
+
+9.1 Les enums simples
+---------------------
+   #[derive(Debug, Clone, Copy, PartialEq)]
+   enum Direction {
+       Nord,
+       Sud,
+       Est,
+       Ouest,
+   }
+
+   let d = Direction::Nord;
+   if d == Direction::Nord { }            // nécessite PartialEq
+
+Avec des valeurs numériques explicites (comme en C) :
+   #[repr(u8)]
+   enum Commande {
+       Lire = 1,
+       Ecrire = 2,
+   }
+   let code = Commande::Ecrire as u8;     // 2
+
+
+9.2 Les enums avec données : la vraie puissance
+----------------------------------------------
+En Rust, chaque variante d'un enum peut CONTENIR des données différentes :
+
+   enum Message {
+       Quitter,                              // aucune donnée
+       Deplacer { x: i32, y: i32 },          // champs nommés
+       Ecrire(String),                       // une String
+       Couleur(u8, u8, u8),                  // trois u8
+   }
+
+   let m = Message::Ecrire(String::from("salut"));
+
+Une variable de type Message contient UNE de ces variantes. En mémoire, c'est
+une "étiquette" (quelle variante ?) plus la place de la plus grande variante.
+C'est exactement l'union étiquetée qu'on écrit à la main en C, mais le
+compilateur vérifie qu'on ne lit jamais la mauvaise variante.
+
+   impl Message {
+       fn traiter(&self) {
+           match self {
+               Message::Quitter => println!("quitter"),
+               Message::Deplacer { x, y } => println!("aller en {x},{y}"),
+               Message::Ecrire(texte) => println!("texte : {texte}"),
+               Message::Couleur(r, g, b) => println!("#{r:02x}{g:02x}{b:02x}"),
+           }
+       }
+   }
+
+
+9.3 Option : la fin du pointeur nul
+-----------------------------------
+Rust n'a PAS de valeur null. À la place, la bibliothèque (core) définit :
+
+   enum Option<T> {
+       None,          // pas de valeur
+       Some(T),       // une valeur de type T
+   }
+
+(Option, Some et None sont toujours disponibles sans import.)
+
+   let quelque_chose: Option<i32> = Some(5);
+   let rien: Option<i32> = None;
+
+   let x: i32 = 5;
+   let y: Option<i32> = Some(3);
+   let somme = x + y;          // ERREUR : on n'additionne pas i32 et Option<i32>
+
+C'est TOUT l'intérêt : le type dit explicitement "cette valeur peut être
+absente", et le compilateur OBLIGE à traiter le cas None avant d'utiliser la
+valeur. L'erreur "déréférencement de pointeur nul" devient impossible.
+
+   fn diviser(a: i32, b: i32) -> Option<i32> {
+       if b == 0 { None } else { Some(a / b) }
+   }
+
+   match diviser(10, 2) {
+       Some(q) => println!("résultat : {q}"),
+       None => println!("division par zéro"),
+   }
+
+Méthodes utiles sur Option :
+   opt.is_some()  opt.is_none()
+   opt.unwrap()             valeur, ou PANIQUE si None (à éviter)
+   opt.expect("message")    pareil avec un message
+   opt.unwrap_or(0)         valeur, ou 0 si None
+   opt.unwrap_or_default()  valeur, ou la valeur par défaut du type
+   opt.map(|v| v * 2)       transforme la valeur si elle existe
+   opt.and_then(f)          enchaîne une fonction qui renvoie un Option
+   opt.filter(|v| *v > 0)   garde la valeur si la condition est vraie
+   opt.ok_or("erreur")      Option -> Result
+   opt.take()               prend la valeur et laisse None (sur une &mut)
+   opt.as_ref()             Option<T> -> Option<&T> (pour ne pas déplacer)
+
+Bonus mémoire : Option<&T> et Option<Box<T>> ont la même taille qu'un simple
+pointeur. Rust utilise l'adresse 0 pour représenter None, puisqu'une référence
+n'est jamais nulle. Même coût qu'un pointeur nullable du C, mais sûr.
+
+
+9.4 match en détail
+-------------------
+match est EXHAUSTIF : tous les cas doivent être traités.
+   fn nom(d: Direction) -> &'static str {
+       match d {
+           Direction::Nord => "nord",
+           Direction::Sud => "sud",
+           // ERREUR : patterns `Direction::Est` and `Direction::Ouest` not
+           // covered
+       }
+   }
+
+Si tu ajoutes une variante à un enum plus tard, le compilateur te montre tous
+les match à mettre à jour. C'est une aide énorme pour faire évoluer un
+programme.
+
+Une branche peut contenir un bloc :
+   match valeur {
+       0 => {
+           println!("zéro");
+           faire_quelque_chose();
+       }
+       _ => {}                  // ne rien faire
+   }
+
+
+9.5 Tous les motifs (patterns)
+------------------------------
+   match x {
+       1 => ...                      littéral
+       2 | 3 => ...                  plusieurs motifs
+       4..=9 => ...                  intervalle inclusif
+       'a'..='z' => ...              intervalle de caractères
+       _ => ...                      joker : n'importe quoi, sans lier
+   }
+
+   n => ...                          lie la valeur à n
+   n @ 10..=20 => ...                lie ET teste : n vaut la valeur si elle est
+                                     entre 10 et 20
+   n if n % 2 == 0 => ...            garde : condition supplémentaire
+
+   (0, y) => ...                     tuple dont le premier élément vaut 0
+   (x, _) => ...                     ignore le second
+   (premier, .., dernier) => ...     .. ignore plusieurs éléments
+
+   Point { x: 0, y } => ...          structure dont x vaut 0
+   Point { x, .. } => ...            ignore les autres champs
+
+   [premier, reste @ ..] => ...      slice : premier élément et le reste
+   [a, b] => ...                     slice d'exactement 2 éléments
+   [] => ...                         slice vide
+
+   Some(Message::Ecrire(t)) => ...   motifs imbriqués
+
+   &valeur => ...                    déstructure une référence
+
+Les motifs ne servent pas qu'avec match. On les utilise aussi dans let, les
+paramètres de fonction, for, if let et while let.
+   let (a, b) = (1, 2);
+   for (i, valeur) in v.iter().enumerate() { }
+
+
+9.6 match et les références
+---------------------------
+Quand on fait un match sur une référence, les variables liées deviennent
+automatiquement des références (on appelle ça les "binding modes") :
+   let opt = Some(String::from("a"));
+   match &opt {
+       Some(s) => println!("{s}"),     // s : &String, rien n'est déplacé
+       None => {}
+   }
+   println!("{opt:?}");                // opt toujours utilisable
+
+Sans le &, la String serait déplacée dans s, et opt serait inutilisable
+ensuite.
+
+
+9.7 if let, let else, while let
+-------------------------------
+if let : quand un seul cas t'intéresse.
+   if let Some(q) = diviser(10, 2) {
+       println!("{q}");
+   } else {
+       println!("impossible");
+   }
+
+Chaînes de let (Rust 1.88, édition 2024) : combiner avec && :
+   if let Some(q) = diviser(10, 2) && q > 3 {
+       println!("grand quotient : {q}");
+   }
+
+let else : récupérer une valeur ou sortir immédiatement.
+   fn traiter(texte: &str) -> u32 {
+       let Ok(n) = texte.parse::<u32>() else {
+           return 0;                 // le bloc else DOIT sortir (return,
+       };                            // break, continue ou panic!)
+       n * 2                         // n est disponible ici
+   }
+
+while let : boucler tant que le motif correspond.
+   let mut pile = vec![1, 2, 3];
+   while let Some(sommet) = pile.pop() {
+       println!("{sommet}");         // 3, 2, 1
+   }
+
+matches! : un bool rapide.
+   let est_voyelle = matches!(c, 'a' | 'e' | 'i' | 'o' | 'u');
+
+
+EXERCICES DU CHAPITRE 9
+-----------------------
+9.1  Crée un enum Forme { Cercle(f64), Rectangle(f64, f64), Triangle(f64,
+     f64, f64) } et une méthode aire (formule de Héron pour le triangle).
+9.2  Écris fn premier_pair(t: &[i32]) -> Option<usize> qui renvoie l'indice
+     du premier nombre pair.
+9.3  Crée un enum Expr { Nombre(i64), Addition(Box<Expr>, Box<Expr>),
+     Multiplication(Box<Expr>, Box<Expr>) } et une fonction evaluer(&Expr)
+     -> i64. (Box est expliqué au 14.2 : il faut une indirection pour qu'un
+     enum se contienne lui-même.)
+9.4  Avec un match sur une slice, écris une fonction qui décrit une slice :
+     "vide", "un élément : x", "commence par x et finit par y".
+
+
+================================================================================
+ 10. CHAÎNES, VECTEURS ET TABLES DE HACHAGE
+================================================================================
+
+Ces types viennent de la couche alloc (Vec, String) ou std (HashMap). Ils
+allouent de la mémoire sur le tas.
+
+10.1 Vec<T> : le tableau de taille variable
+-------------------------------------------
+   let mut v: Vec<i32> = Vec::new();
+   let mut w = vec![1, 2, 3];              // macro vec!
+   let zeros = vec![0; 100];
+   let mut x = Vec::with_capacity(1000);   // réserve la place d'avance
+   x.push(1);
+
+En mémoire, un Vec ressemble à une String : pointeur, longueur, capacité.
+Quand la longueur atteint la capacité, push réserve un bloc plus grand
+(environ deux fois plus), copie les éléments, et libère l'ancien bloc. C'est
+pour ça qu'une référence vers un élément empêche push (7.3).
+
+Opérations :
+   v.push(4)             ajoute à la fin
+   v.pop()               retire le dernier : Option<T>
+   v.len()               nombre d'éléments
+   v.is_empty()
+   v[i]                  accès (PANIQUE si hors bornes)
+   v.get(i)              accès sûr : Option<&T>
+   v.first(), v.last()   Option<&T>
+   v.insert(i, x)        insère à la position i (décale la suite)
+   v.remove(i)           retire à la position i (décale la suite)
+   v.swap_remove(i)      retire en mettant le dernier à la place (rapide)
+   v.contains(&x)
+   v.sort()              tri stable
+   v.sort_unstable()     tri plus rapide, ordre des égaux non garanti
+   v.sort_by(|a, b| b.cmp(a))      tri avec une comparaison personnalisée
+   v.dedup()             supprime les doublons CONSÉCUTIFS
+   v.reverse()
+   v.extend([5, 6])      ajoute plusieurs éléments
+   v.truncate(n)         garde les n premiers
+   v.clear()             vide
+   v.retain(|x| *x > 0)  garde les éléments qui vérifient la condition
+   v.iter().sum::<i32>() somme
+   v.capacity()
+
+Toutes les méthodes des slices (7.7) marchent sur un Vec : &v[1..3], v.len()...
+
+Un Vec ne peut contenir qu'un seul type. Pour plusieurs types, on utilise un
+enum (9.2) ou des objets traits (12.8).
+
+
+10.2 String et &str en détail
+-----------------------------
+   String   possédée, modifiable, sur le tas        (couche alloc)
+   &str     emprunt d'une chaîne, lecture seule     (couche core)
+
+Les deux sont TOUJOURS de l'UTF-8 valide.
+
+Créer :
+   let s = String::new();
+   let s = String::from("texte");
+   let s = "texte".to_string();
+   let s = format!("{} + {} = {}", 1, 2, 3);   // comme println!, mais renvoie
+                                               // une String
+
+Modifier :
+   s.push('c');            ajoute un caractère
+   s.push_str("abc");      ajoute une chaîne
+   let t = s + "suite";    concatène : s est DÉPLACÉE dans t
+   s.insert(0, 'X');
+   s.clear();
+
+Lire :
+   s.len()                 longueur en OCTETS (pas en caractères !)
+   s.chars().count()       nombre de caractères
+   s.is_empty()
+   s.contains("abc")
+   s.starts_with("ab")    s.ends_with("yz")
+   s.find("b")             Option<usize> : position en octets
+   s.as_str()              String -> &str
+
+Transformer (renvoient une nouvelle String ou un &str) :
+   s.to_uppercase()   s.to_lowercase()
+   s.trim()           enlève les espaces au début et à la fin
+   s.replace("a", "b")
+   s.repeat(3)
+
+Découper :
+   for mot in s.split_whitespace() { }
+   for partie in s.split(',') { }
+   for ligne in s.lines() { }
+   let (avant, apres) = s.split_once('=').unwrap();
+
+Parcourir :
+   for c in s.chars() { }          caractères (char)
+   for b in s.bytes() { }          octets (u8)
+   for (i, c) in s.char_indices() { }   position en octets + caractère
+
+Convertir :
+   let n: i32 = "42".parse().unwrap();      // Result, car ça peut échouer
+   let n = "42".parse::<i32>();             // la même, type précisé avec ::<>
+   let texte = 42.to_string();
+
+POURQUOI s[0] NE COMPILE PAS :
+   let s = String::from("été");
+   s[0]         // ERREUR
+En UTF-8, un caractère fait de 1 à 4 octets. "été" fait 5 octets pour 3
+caractères. s[0] serait-il l'octet 0xC3 (la moitié d'un é) ou le caractère
+'é' ? Pour éviter l'ambiguïté, Rust refuse. On choisit explicitement :
+s.chars().nth(0), s.as_bytes()[0], ou une slice &s[0..2].
+
+Autres types de chaînes, pour information :
+   OsString / &OsStr     noms de fichiers du système (pas forcément UTF-8)
+   PathBuf / &Path       chemins de fichiers
+   CString / &CStr       chaînes terminées par \0, pour appeler du C
+
+
+10.3 HashMap<K, V> : la table de hachage
+----------------------------------------
+   use std::collections::HashMap;
+
+   let mut scores: HashMap<String, u32> = HashMap::new();
+   scores.insert(String::from("Alice"), 10);
+   scores.insert(String::from("Bob"), 7);
+
+   match scores.get("Alice") {             // Option<&u32>
+       Some(s) => println!("{s}"),
+       None => println!("inconnu"),
+   }
+
+   scores.insert(String::from("Bob"), 9);  // remplace l'ancienne valeur
+   scores.remove("Bob");
+   scores.contains_key("Alice");
+
+   for (nom, score) in &scores {           // ordre NON garanti
+       println!("{nom} : {score}");
+   }
+
+L'API entry : insérer ou modifier en une seule recherche.
+   let texte = "le chat et le chien et le rat";
+   let mut compte = HashMap::new();
+   for mot in texte.split_whitespace() {
+       *compte.entry(mot).or_insert(0) += 1;
+   }
+   // {"le": 3, "et": 2, "chat": 1, "chien": 1, "rat": 1}
+
+Possession : insert DÉPLACE la clé et la valeur dans la table (sauf si elles
+sont Copy).
+
+
+10.4 Les autres collections
+---------------------------
+   (toutes dans std::collections)
+   VecDeque<T>     file à double extrémité : push/pop rapides aux deux bouts
+   BTreeMap<K, V>  table TRIÉE par clé (parcours dans l'ordre)
+   HashSet<T>      ensemble sans doublons
+   BTreeSet<T>     ensemble trié
+   BinaryHeap<T>   file de priorité (le plus grand sort en premier)
+   LinkedList<T>   liste chaînée (rarement le bon choix : Vec est presque
+                   toujours plus rapide grâce au cache du processeur)
+
+
+EXERCICES DU CHAPITRE 10
+------------------------
+10.1 Écris une fonction qui prend une &str et renvoie un Vec<&str> des mots
+     de plus de 3 lettres.
+10.2 Écris une fonction qui compte la fréquence de chaque caractère d'un
+     texte dans une HashMap<char, usize>, puis affiche les résultats triés
+     par fréquence décroissante.
+10.3 Écris fn inverser_mots(s: &str) -> String : "salut le monde" donne
+     "monde le salut".
+
+
+================================================================================
+ 11. LA GESTION DES ERREURS
+================================================================================
+
+Rust sépare deux sortes d'erreurs :
+   - IRRÉCUPÉRABLES (bugs) : panic!, le programme s'arrête.
+   - RÉCUPÉRABLES (fichier absent, saisie invalide) : Result, l'appelant
+     décide quoi faire.
+Il n'y a pas d'exceptions comme en Java ou en Python.
+
+11.1 panic!
+-----------
+   panic!("impossible : {valeur}");
+
+Une panique affiche le message, puis par défaut "déroule" la pile en appelant
+les destructeurs (Drop), et arrête le thread. Dans main, ça arrête le
+programme.
+
+Ce qui provoque une panique : panic!, un indice hors bornes, unwrap sur None
+ou Err, une division entière par zéro, un dépassement en mode debug.
+
+Voir la pile d'appels : RUST_BACKTRACE=1 cargo run
+
+Pour arrêter immédiatement sans dérouler (exécutable plus petit, obligatoire
+en no_std), dans Cargo.toml :
+   [profile.release]
+   panic = "abort"
+
+Macros de vérification :
+   assert!(condition);                 panique si faux
+   assert!(x > 0, "x doit être positif, il vaut {x}");
+   assert_eq!(a, b);                   panique si a != b, affiche les deux
+   assert_ne!(a, b);
+   debug_assert!(...)                  seulement en mode debug
+   unreachable!()                      "ce code ne devrait jamais être atteint"
+   todo!()                             "pas encore écrit" (compile quand même)
+   unimplemented!()
+
+
+11.2 Result<T, E>
+-----------------
+   enum Result<T, E> {
+       Ok(T),       // succès, avec la valeur
+       Err(E),      // échec, avec l'erreur
+   }
+
+   fn diviser(a: i32, b: i32) -> Result<i32, String> {
+       if b == 0 {
+           Err(String::from("division par zéro"))
+       } else {
+           Ok(a / b)
+       }
+   }
+
+   match diviser(10, 0) {
+       Ok(q) => println!("{q}"),
+       Err(e) => println!("erreur : {e}"),
+   }
+
+Result est marqué #[must_use] : ignorer un Result provoque un avertissement.
+Impossible d'oublier de vérifier une erreur par inattention, contrairement au
+C où la valeur de retour d'une fonction s'ignore en silence.
+
+Méthodes utiles (très proches de celles d'Option) :
+   r.is_ok()  r.is_err()
+   r.unwrap()             valeur, ou panique
+   r.expect("message")    valeur, ou panique avec ce message
+   r.unwrap_or(0)
+   r.unwrap_or_else(|e| { ... })
+   r.map(|v| v * 2)       transforme la valeur de succès
+   r.map_err(|e| ...)     transforme l'erreur
+   r.ok()                 Result -> Option (perd l'erreur)
+   r.and_then(f)          enchaîne une opération qui peut échouer
+
+
+11.3 L'opérateur ?
+------------------
+Propager une erreur à l'appelant est si courant qu'il existe un opérateur
+dédié :
+
+   fn lire_nombre(texte: &str) -> Result<i32, std::num::ParseIntError> {
+       let n = texte.trim().parse::<i32>()?;    // si Err, RENVOIE l'erreur
+       Ok(n * 2)                               // sinon continue avec la valeur
+   }
+
+expr? équivaut à :
+   match expr {
+       Ok(v) => v,
+       Err(e) => return Err(From::from(e)),    // convertit l'erreur si besoin
+   }
+
+? marche aussi avec Option dans une fonction qui renvoie Option : un None
+fait sortir de la fonction avec None.
+
+   fn premier_caractere_majuscule(s: &str) -> Option<char> {
+       let c = s.chars().next()?;              // None si la chaîne est vide
+       Some(c.to_ascii_uppercase())
+   }
+
+On ne peut utiliser ? que dans une fonction qui renvoie Result ou Option.
+main peut renvoyer un Result :
+   fn main() -> Result<(), Box<dyn std::error::Error>> {
+       let n: i32 = "42".parse()?;
+       println!("{n}");
+       Ok(())
+   }
+(Box<dyn Error> signifie "n'importe quelle erreur" : voir 12.8 et 14.2.)
+
+
+11.4 Créer son propre type d'erreur
+-----------------------------------
+   use std::fmt;
+
+   #[derive(Debug)]
+   enum ErreurConfig {
+       FichierAbsent,
+       LigneInvalide(usize),
+       Nombre(std::num::ParseIntError),
+   }
+
+   impl fmt::Display for ErreurConfig {
+       fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+           match self {
+               ErreurConfig::FichierAbsent => write!(f, "fichier absent"),
+               ErreurConfig::LigneInvalide(n) => write!(f, "ligne {n} invalide"),
+               ErreurConfig::Nombre(e) => write!(f, "nombre invalide : {e}"),
+           }
+       }
+   }
+
+   impl std::error::Error for ErreurConfig {}
+
+   // Permet à ? de convertir automatiquement ParseIntError en ErreurConfig
+   impl From<std::num::ParseIntError> for ErreurConfig {
+       fn from(e: std::num::ParseIntError) -> Self {
+           ErreurConfig::Nombre(e)
+       }
+   }
+
+   fn lire_port(ligne: &str) -> Result<u16, ErreurConfig> {
+       let (cle, valeur) = ligne.split_once('=')
+           .ok_or(ErreurConfig::LigneInvalide(1))?;
+       if cle.trim() != "port" {
+           return Err(ErreurConfig::LigneInvalide(1));
+       }
+       Ok(valeur.trim().parse()?)       // ParseIntError -> ErreurConfig
+   }
+
+Dans de vrais projets, les crates thiserror (pour les bibliothèques) et
+anyhow (pour les applications) évitent d'écrire tout ce code à la main.
+
+
+11.5 Quand paniquer, quand renvoyer Result ?
+--------------------------------------------
+   - L'erreur vient d'un BUG dans le programme (état impossible, invariant
+     violé) -> panic!
+   - L'erreur peut arriver normalement (entrée utilisateur, fichier, réseau)
+     -> Result
+   - Dans les exemples, prototypes et tests, unwrap et expect sont acceptables.
+   - Dans du vrai code, préfère expect("explication") à unwrap : le message
+     aide énormément quand ça plante.
+
+
+EXERCICES DU CHAPITRE 11
+------------------------
+11.1 Écris fn moyenne(t: &[f64]) -> Option<f64> (None si la slice est vide).
+11.2 Écris fn somme_texte(s: &str) -> Result<i64, std::num::ParseIntError>
+     qui additionne des nombres séparés par des virgules ("1, 2, 3") en
+     utilisant ?.
+11.3 Crée un enum ErreurCompte { SoldeInsuffisant { manque: i64 },
+     MontantNegatif } et modifie retirer de l'exercice 8.1 pour qu'elle
+     renvoie Result<(), ErreurCompte>.
+
+
+================================================================================
+ 12. LES GÉNÉRIQUES ET LES TRAITS
+================================================================================
+
+12.1 Les fonctions génériques
+-----------------------------
+Écrire une seule fonction qui marche pour plusieurs types :
+
+   fn plus_grand<T: PartialOrd>(t: &[T]) -> &T {
+       let mut max = &t[0];
+       for x in t {
+           if x > max {
+               max = x;
+           }
+       }
+       max
+   }
+
+   plus_grand(&[3, 7, 2]);          // T = i32
+   plus_grand(&[1.5, 0.2]);         // T = f64
+   plus_grand(&['a', 'z', 'm']);    // T = char
+
+<T> déclare un paramètre de type. ": PartialOrd" est une CONTRAINTE : T doit
+savoir se comparer avec > (voir 12.4). Sans elle, le compilateur refuse
+x > max, car rien ne garantit qu'un T quelconque soit comparable.
+
+
+12.2 Les structures et enums génériques
+---------------------------------------
+   struct Paire<T> {
+       a: T,
+       b: T,
+   }
+
+   impl<T> Paire<T> {
+       fn new(a: T, b: T) -> Self {
+           Self { a, b }
+       }
+   }
+
+   impl<T: PartialOrd + Copy> Paire<T> {      // méthodes seulement si T le
+       fn max(&self) -> T {                   // permet
+           if self.a > self.b { self.a } else { self.b }
+       }
+   }
+
+   impl Paire<f64> {                          // méthodes seulement pour f64
+       fn moyenne(&self) -> f64 {
+           (self.a + self.b) / 2.0
+       }
+   }
+
+Option<T>, Result<T, E>, Vec<T>, HashMap<K, V> et Box<T> sont tous des types
+génériques.
+
+
+12.3 Le coût des génériques : zéro
+----------------------------------
+Le compilateur génère une version SPÉCIALISÉE de la fonction pour chaque type
+utilisé (monomorphisation). plus_grand::<i32> et plus_grand::<f64> deviennent
+deux fonctions distinctes dans l'exécutable, aussi rapides que si tu les avais
+écrites à la main. Le prix : un temps de compilation et un exécutable un peu
+plus gros.
+
+
+12.4 Les traits : définir un comportement commun
+------------------------------------------------
+Un TRAIT décrit des méthodes qu'un type doit fournir. C'est proche d'une
+interface en Java, ou d'une table de pointeurs de fonctions en C.
+
+   trait Forme {
+       fn aire(&self) -> f64;                      // à implémenter
+
+       fn description(&self) -> String {           // méthode par défaut
+           format!("forme d'aire {:.2}", self.aire())
+       }
+   }
+
+   struct Cercle { rayon: f64 }
+   struct Carre { cote: f64 }
+
+   impl Forme for Cercle {
+       fn aire(&self) -> f64 {
+           std::f64::consts::PI * self.rayon * self.rayon
+       }
+   }
+
+   impl Forme for Carre {
+       fn aire(&self) -> f64 {
+           self.cote * self.cote
+       }
+       fn description(&self) -> String {          // remplace celle par défaut
+           format!("carré de côté {}", self.cote)
+       }
+   }
+
+Règle de cohérence (orphan rule) : tu peux implémenter un trait pour un type
+seulement si le trait OU le type est défini dans ta crate. Tu ne peux pas
+implémenter Display pour Vec<i32>, car les deux viennent de std. (Solution :
+un newtype, 8.3.)
+
+
+12.5 Les contraintes de traits
+------------------------------
+Plusieurs écritures équivalentes :
+
+   fn afficher_aire<T: Forme>(f: &T) { }
+
+   fn afficher_aire(f: &impl Forme) { }          // raccourci
+
+   fn comparer<T, U>(a: &T, b: &U) -> bool
+   where
+       T: Forme + std::fmt::Debug,               // + : plusieurs traits
+       U: Forme,
+   {
+       a.aire() > b.aire()
+   }
+
+Renvoyer "un type qui implémente un trait" sans le nommer :
+   fn creer_forme() -> impl Forme {
+       Carre { cote: 2.0 }
+   }
+
+
+12.6 Les traits de la bibliothèque à connaître
+----------------------------------------------
+Beaucoup peuvent être générés automatiquement avec #[derive(...)] :
+
+   Debug        affichage {:?}
+   Clone        .clone()
+   Copy         copie implicite au lieu du déplacement (exige Clone)
+   PartialEq    == et !=
+   Eq           égalité "totale" (pas pour f64, car NaN != NaN)
+   PartialOrd   < > <= >=
+   Ord          ordre total : nécessaire pour sort() et BTreeMap
+   Hash         nécessaire pour être clé de HashMap
+   Default      valeur par défaut : Type::default()
+
+   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+   struct Coord { x: i32, y: i32 }
+
+À implémenter à la main :
+
+   Display : affichage {} "pour humains"
+      use std::fmt;
+      impl fmt::Display for Coord {
+          fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+              write!(f, "({}, {})", self.x, self.y)
+          }
+      }
+      println!("{}", c);                  // (1, 2)
+      let texte = c.to_string();          // offert gratuitement par Display
+
+   From / Into : conversions
+      impl From<(i32, i32)> for Coord {
+          fn from((x, y): (i32, i32)) -> Self {
+              Coord { x, y }
+          }
+      }
+      let c = Coord::from((1, 2));
+      let c: Coord = (1, 2).into();       // Into est offert par From
+
+   Les opérateurs (std::ops) : surcharge de +, -, *, [], etc.
+      use std::ops::Add;
+      impl Add for Coord {
+          type Output = Coord;
+          fn add(self, autre: Coord) -> Coord {
+              Coord { x: self.x + autre.x, y: self.y + autre.y }
+          }
+      }
+      let c3 = c1 + c2;
+   Autres : Sub, Mul, Div, Neg, AddAssign (+=), Index ([]), Not (!)...
+
+   Iterator (13.4), Drop (6.8), Deref (14.3)
+
+
+12.7 Types et constantes associés
+---------------------------------
+Un trait peut déclarer un type que chaque implémentation choisit :
+   trait Conteneur {
+       type Element;                        // type associé
+       const CAPACITE: usize;               // constante associée
+       fn premier(&self) -> Option<&Self::Element>;
+   }
+
+Iterator en est l'exemple le plus connu : type Item est le type des éléments.
+
+
+12.8 Les objets traits : dyn Trait
+----------------------------------
+Les génériques choisissent le type À LA COMPILATION. Parfois on veut mélanger
+des types différents à l'EXÉCUTION, par exemple une liste de formes variées :
+
+   let formes: Vec<Box<dyn Forme>> = vec![
+       Box::new(Cercle { rayon: 1.0 }),
+       Box::new(Carre { cote: 2.0 }),
+   ];
+
+   for f in &formes {
+       println!("{}", f.description());    // appelle la bonne méthode
+   }
+
+dyn Forme signifie "un type quelconque qui implémente Forme". Sa taille est
+inconnue, donc on le manipule toujours derrière un pointeur : &dyn Forme,
+Box<dyn Forme>, Rc<dyn Forme>.
+
+En mémoire, un &dyn Forme est un POINTEUR LARGE de deux mots :
+   [ pointeur vers les données | pointeur vers la VTABLE ]
+La vtable est une table de pointeurs de fonctions générée par le compilateur
+(aire, description, drop, taille...). L'appel passe par cette table :
+exactement ce qu'on fait à la main en C avec une structure de pointeurs de
+fonctions.
+
+   Génériques <T: Trait>     dispatch STATIQUE : résolu à la compilation,
+                             plus rapide, peut être inliné
+   dyn Trait                 dispatch DYNAMIQUE : un appel indirect via la
+                             vtable, mais permet des collections hétérogènes
+
+Tous les traits ne peuvent pas devenir des objets traits : par exemple un
+trait avec une méthode générique, ou qui renvoie Self, ne le peut pas
+(le compilateur l'explique quand ça arrive).
+
+
+12.9 Génériques et durées de vie ensemble
+-----------------------------------------
+Les durées de vie sont aussi des paramètres génériques :
+   fn plus_long_avec_annonce<'a, T: std::fmt::Display>(
+       x: &'a str,
+       y: &'a str,
+       annonce: T,
+   ) -> &'a str {
+       println!("{annonce}");
+       if x.len() > y.len() { x } else { y }
+   }
+
+T: 'static signifie "T ne contient pas de références temporaires" (il possède
+toutes ses données, ou n'emprunte que des données 'static). C'est exigé par
+exemple pour envoyer une valeur dans un thread (chapitre 17).
+
+
+EXERCICES DU CHAPITRE 12
+------------------------
+12.1 Écris une fonction générique fn plus_petit<T: PartialOrd + Copy>(t: &[T])
+     -> Option<T>.
+12.2 Crée un trait Animal avec nom(&self) -> String et cri(&self) -> String,
+     et une méthode par défaut presenter. Implémente-le pour Chien et Chat,
+     puis range-les dans un Vec<Box<dyn Animal>>.
+12.3 Crée une structure Vecteur2 { x: f64, y: f64 } qui implémente Display,
+     Add, Sub, Mul<f64> (multiplication par un nombre) et PartialEq.
+
+
+================================================================================
+ 13. LES CLOSURES ET LES ITÉRATEURS
+================================================================================
+
+13.1 Les closures
+-----------------
+Une CLOSURE est une fonction anonyme qui peut CAPTURER les variables autour
+d'elle.
+
+   let ajouter_un = |x: i32| -> i32 { x + 1 };
+   let ajouter_un = |x| x + 1;          // types déduits, accolades facultatives
+   println!("{}", ajouter_un(5));       // 6
+
+   let decalage = 10;
+   let decaler = |x| x + decalage;      // capture decalage
+   println!("{}", decaler(5));          // 15
+
+Une fonction normale (fn) ne peut PAS capturer son environnement.
+
+
+13.2 Comment une closure capture
+--------------------------------
+Le compilateur choisit le mode le moins contraignant possible :
+
+   1. par référence partagée (&) si elle ne fait que lire :
+      let s = String::from("a");
+      let lire = || println!("{s}");
+      lire();
+      println!("{s}");                  // OK : s seulement empruntée
+
+   2. par référence modifiable (&mut) si elle modifie :
+      let mut compteur = 0;
+      let mut incrementer = || compteur += 1;   // la closure doit être mut
+      incrementer();
+      incrementer();
+      println!("{compteur}");           // 2 (l'emprunt est terminé)
+
+   3. par possession (déplacement) si elle consomme la valeur :
+      let s = String::from("a");
+      let consommer = || drop(s);
+      consommer();
+      // println!("{s}");               // ERREUR : s a été déplacée
+
+Le mot-clé move FORCE la capture par possession, même si la closure ne fait
+que lire. Indispensable quand la closure doit survivre à la fonction qui la
+crée, ou partir dans un thread :
+   let s = String::from("a");
+   let c = move || println!("{s}");     // s est déplacée dans la closure
+
+
+13.3 Fn, FnMut, FnOnce
+----------------------
+Chaque closure implémente un ou plusieurs de ces traits :
+   FnOnce   peut être appelée au moins UNE fois (toutes les closures)
+   FnMut    peut être appelée plusieurs fois, en modifiant ce qu'elle capture
+   Fn       peut être appelée plusieurs fois, sans rien modifier
+
+Fonctions qui prennent une closure :
+   fn appliquer<F: Fn(i32) -> i32>(f: F, x: i32) -> i32 {
+       f(x)
+   }
+
+   fn repeter(n: usize, mut action: impl FnMut()) {
+       for _ in 0..n {
+           action();
+       }
+   }
+
+   appliquer(|x| x * 2, 21);           // 42
+   let mut total = 0;
+   repeter(3, || total += 5);          // total vaut 15
+
+Renvoyer une closure :
+   fn multiplicateur(n: i32) -> impl Fn(i32) -> i32 {
+       move |x| x * n                  // move : n doit survivre à la fonction
+   }
+   let triple = multiplicateur(3);
+   triple(7);                          // 21
+
+   Pour choisir la closure à l'exécution : Box<dyn Fn(i32) -> i32>.
+
+
+13.4 Les itérateurs
+-------------------
+Un ITÉRATEUR produit une suite de valeurs, une par une. C'est un trait :
+   trait Iterator {
+       type Item;
+       fn next(&mut self) -> Option<Self::Item>;
+       // + des dizaines de méthodes offertes
+   }
+
+next renvoie Some(valeur) tant qu'il y en a, puis None. Une boucle for
+appelle simplement next jusqu'à obtenir None.
+
+Trois façons d'obtenir un itérateur sur une collection :
+   v.iter()          produit des &T           (emprunte)
+   v.iter_mut()      produit des &mut T       (emprunte en modification)
+   v.into_iter()     produit des T            (consomme la collection)
+
+   let v = vec![1, 2, 3];
+   let mut it = v.iter();
+   it.next();      // Some(&1)
+   it.next();      // Some(&2)
+   it.next();      // Some(&3)
+   it.next();      // None
+
+
+13.5 Les adaptateurs et les consommateurs
+-----------------------------------------
+Les ADAPTATEURS transforment un itérateur en un autre. Ils sont PARESSEURS :
+rien ne se passe tant qu'un CONSOMMATEUR ne réclame pas les valeurs.
+
+   let v = vec![1, 2, 3, 4, 5, 6];
+
+   let carres_pairs: Vec<i32> = v.iter()
+       .filter(|x| *x % 2 == 0)     // garde 2, 4, 6
+       .map(|x| x * x)              // 4, 16, 36
+       .collect();                  // CONSOMME et range dans un Vec
+
+Adaptateurs courants :
+   .map(|x| ...)              transforme chaque élément
+   .filter(|x| ...)           garde ceux qui vérifient la condition
+   .filter_map(|x| ...)       map + filtre en une fois (garde les Some)
+   .enumerate()               ajoute l'indice : (0, a), (1, b)...
+   .zip(autre)                associe deux itérateurs : (a1, b1), (a2, b2)...
+   .rev()                     à l'envers
+   .skip(n)  .take(n)         saute / garde les n premiers
+   .skip_while(..) .take_while(..)
+   .chain(autre)              met bout à bout
+   .flat_map(|x| ...)         map puis aplatit
+   .step_by(n)                un élément sur n
+   .peekable()                permet de regarder le suivant sans avancer
+   .cloned()  .copied()       &T -> T
+   .inspect(|x| ...)          regarde passer (pour déboguer)
+
+Consommateurs courants :
+   .collect()                 construit une collection (Vec, String, HashMap)
+   .sum()  .product()
+   .count()
+   .min()  .max()             Option
+   .min_by_key(|x| ...)
+   .fold(init, |acc, x| ...)  accumule
+   .any(|x| ...)  .all(|x| ...)
+   .find(|x| ...)             premier qui vérifie : Option
+   .position(|x| ...)         indice du premier : Option
+   .last()  .nth(n)
+   .for_each(|x| ...)
+
+Sur les slices, en plus :
+   t.windows(2)               fenêtres glissantes : [a,b], [b,c], [c,d]
+   t.chunks(3)                paquets de 3
+
+Exemples :
+   let texte = "un deux trois";
+   let longueurs: Vec<usize> = texte.split_whitespace().map(|m| m.len()).collect();
+
+   let somme_carres: i32 = (1..=10).map(|x| x * x).sum();    // 385
+
+   let noms = ["Alice", "Bob"];
+   let ages = [30, 25];
+   for (nom, age) in noms.iter().zip(ages.iter()) { }
+
+   let majuscules: String = "salut".chars().map(|c| c.to_ascii_uppercase()).collect();
+
+   let tous_positifs = v.iter().all(|&x| x > 0);
+
+Performances : grâce aux génériques et à l'inlining, une chaîne
+d'itérateurs compile en général vers le même code machine qu'une boucle
+écrite à la main, sans vérification d'indices. On parle d'abstraction à coût
+nul.
+
+
+13.6 Créer son propre itérateur
+-------------------------------
+   struct Fibonacci {
+       a: u64,
+       b: u64,
+   }
+
+   impl Iterator for Fibonacci {
+       type Item = u64;
+       fn next(&mut self) -> Option<u64> {
+           let valeur = self.a;
+           self.a = self.b;
+           self.b += valeur;
+           Some(valeur)                 // itérateur infini
+       }
+   }
+
+   let premiers: Vec<u64> = Fibonacci { a: 0, b: 1 }.take(10).collect();
+   // [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+
+   let pairs_sous_1000: u64 = Fibonacci { a: 0, b: 1 }
+       .take_while(|&x| x < 1000)
+       .filter(|x| x % 2 == 0)
+       .sum();                          // 798
+
+En implémentant juste next, on obtient gratuitement map, filter, sum...
+
+
+EXERCICES DU CHAPITRE 13
+------------------------
+13.1 Avec des itérateurs uniquement (pas de boucle for), calcule la somme des
+     multiples de 3 ou 5 inférieurs à 1000.
+13.2 Écris fn compter_mots_longs(texte: &str, n: usize) -> usize.
+13.3 Crée un itérateur Compte { debut: u32, fin: u32 } qui produit les
+     nombres de debut à fin, puis utilise-le avec zip, map et sum.
+13.4 Écris une fonction fn composer(f, g) qui renvoie une closure calculant
+     g(f(x)).
+
+
+================================================================================
+ 14. LES POINTEURS : Box, Rc, RefCell, POINTEURS BRUTS ET unsafe
+================================================================================
+
+Tu connais déjà les références & et &mut (chapitre 7) : ce sont les
+pointeurs de tous les jours, vérifiés par le compilateur. Ce chapitre présente
+tous les autres : les POINTEURS INTELLIGENTS (smart pointers), qui possèdent
+leurs données et ajoutent des capacités, puis les POINTEURS BRUTS, identiques
+à ceux du C, qui exigent unsafe.
+
+
+14.1 Vue d'ensemble
+-------------------
+   Type            Possède ?  Où ?   Modifiable ?          Vérifié quand ?
+   --------------  ---------  -----  --------------------  -----------------
+   &T              non        -      non                   compilation
+   &mut T          non        -      oui (unique)          compilation
+   Box<T>          oui (seul) tas    si la Box est mut     compilation
+   Rc<T>           partagé    tas    non                   compteur à l'exéc.
+   Arc<T>          partagé    tas    non                   compteur atomique
+   Weak<T>         non        tas    non                   à l'exécution
+   Cell<T>         oui        sur    oui, par copie        rien à vérifier
+                              place
+   RefCell<T>      oui        sur    oui, via borrow_mut   à l'exécution
+                              place                        (panique si abus)
+   Mutex<T>        oui        sur    oui, via lock         à l'exécution
+                              place                        (bloque)
+   *const T        non        -      non                   JAMAIS (unsafe)
+   *mut T          non        -      oui                   JAMAIS (unsafe)
+   NonNull<T>      non        -      oui                   JAMAIS (unsafe),
+                                                           mais jamais nul
+   fn(A) -> B      -          code   -                     compilation
+
+Combinaisons classiques :
+   Rc<RefCell<T>>       plusieurs propriétaires qui modifient (1 thread)
+   Arc<Mutex<T>>        plusieurs propriétaires qui modifient (plusieurs
+                        threads)
+   Box<dyn Trait>       un objet de type inconnu à la compilation
+
+
+14.2 Box<T> : une valeur sur le tas
+-----------------------------------
+Box<T> est le pointeur intelligent le plus simple : il range une valeur sur le
+tas et POSSÈDE cette valeur. C'est malloc + free, automatique et sûr.
+
+   let b = Box::new(5);          // 5 est rangé sur le tas
+   println!("{}", b);            // 5 (déréférencement automatique)
+   let x = *b + 1;               // * pour obtenir la valeur
+   // à la fin de la portée : la Box est détruite, le tas est libéré
+
+      PILE                TAS
+      b : [ adresse ] --> [ 5 ]
+          8 octets
+
+Box<T> a exactement la taille d'un pointeur. Aucun surcoût par rapport à un
+pointeur C : pas de compteur, pas d'en-tête.
+
+Une Box suit les règles de possession : elle se DÉPLACE, et une seule
+variable la possède.
+   let b1 = Box::new(String::from("a"));
+   let b2 = b1;                  // déplacement : b1 inutilisable
+
+QUAND UTILISER Box :
+
+1. Les TYPES RÉCURSIFS. Un type ne peut pas se contenir directement, car sa
+   taille serait infinie :
+      enum Liste {
+          Noeud(i32, Liste),         // ERREUR E0072 : recursive type has
+          Vide,                      // infinite size
+      }
+
+   Avec une Box, la variante contient un pointeur, de taille fixe :
+      enum Liste {
+          Noeud(i32, Box<Liste>),
+          Vide,
+      }
+      use Liste::{Noeud, Vide};
+      let liste = Noeud(1, Box::new(Noeud(2, Box::new(Noeud(3, Box::new(Vide))))));
+
+      liste : [1 | *]--> [2 | *]--> [3 | *]--> [Vide]
+              (pile)     (tas)      (tas)      (tas)
+
+   Même chose pour un arbre binaire :
+      struct Arbre {
+          valeur: i32,
+          gauche: Option<Box<Arbre>>,     // Option<Box<..>> : pointeur
+          droite: Option<Box<Arbre>>,     // nullable sûr, 8 octets
+      }
+
+2. Les OBJETS TRAITS : Box<dyn Forme> (12.8).
+
+3. Les GROSSES VALEURS qu'on veut déplacer sans copier beaucoup d'octets :
+   déplacer une Box ne copie que le pointeur.
+
+Relâcher et reprendre le contrôle manuellement (utile pour le C) :
+   let brut: *mut i32 = Box::into_raw(Box::new(7));  // plus de free auto
+   let b = unsafe { Box::from_raw(brut) };           // redevient une Box
+   let pour_toujours: &'static mut i32 = Box::leak(Box::new(8));  // jamais
+                                                                  // libérée
+
+
+14.3 Les traits Deref et Drop : ce qui rend un pointeur "intelligent"
+---------------------------------------------------------------------
+Un pointeur intelligent est une structure qui implémente :
+   - Deref (et DerefMut) : pour que *p et les appels de méthodes marchent ;
+   - Drop : pour libérer la ressource à la fin.
+
+   use std::ops::Deref;
+
+   struct MaBoite<T>(T);
+
+   impl<T> Deref for MaBoite<T> {
+       type Target = T;
+       fn deref(&self) -> &T {
+           &self.0
+       }
+   }
+
+   let x = MaBoite(5);
+   assert_eq!(5, *x);          // *x est traduit en *(x.deref())
+
+Coercition de déréférencement : grâce à Deref, Rust convertit
+automatiquement une référence si le type attendu ne correspond pas.
+   fn saluer(nom: &str) { }
+   let b = MaBoite(String::from("Alice"));
+   saluer(&b);        // &MaBoite<String> -> &String -> &str, automatiquement
+
+C'est ce mécanisme qui transforme &String en &str et &Vec<T> en &[T].
+
+
+14.4 Rc<T> : plusieurs propriétaires
+------------------------------------
+Parfois une donnée n'a pas UN propriétaire naturel. Par exemple, un noeud de
+graphe référencé par plusieurs autres. Rc (Reference Counted) garde un
+COMPTEUR du nombre de propriétaires, et libère la donnée quand il tombe à 0.
+
+   use std::rc::Rc;
+
+   let a = Rc::new(String::from("partagé"));
+   println!("{}", Rc::strong_count(&a));      // 1
+
+   let b = Rc::clone(&a);                     // ne copie PAS la String :
+   println!("{}", Rc::strong_count(&a));      // incrémente le compteur -> 2
+
+   {
+       let c = Rc::clone(&a);
+       println!("{}", Rc::strong_count(&a));  // 3
+   }                                          // c détruit -> 2
+
+   println!("{a} {b}");                       // les deux accèdent à la donnée
+
+En mémoire :
+      a : [ptr] ----+
+                    +---> [ compteur fort : 2 | compteur faible | "partagé" ]
+      b : [ptr] ----+                                     (tas)
+
+(Le compteur faible sert aux Weak, voir 14.6.)
+
+Convention : écris Rc::clone(&a) plutôt que a.clone(), pour montrer qu'on ne
+copie pas les données, juste le pointeur.
+
+Deux limites :
+   - Rc donne un accès en LECTURE SEULE (plusieurs propriétaires qui
+     modifieraient en même temps violeraient la règle d'or). Pour modifier :
+     RefCell (14.5).
+   - Rc n'est PAS utilisable entre threads (compteur non atomique). Le
+     compilateur l'interdit. Pour les threads : Arc (14.7).
+
+
+14.5 Cell<T> et RefCell<T> : la mutabilité intérieure
+-----------------------------------------------------
+La règle d'or (7.3) est vérifiée à la compilation. Mais certains programmes
+corrects ne peuvent pas être prouvés corrects par le compilateur. La
+MUTABILITÉ INTÉRIEURE permet de modifier une donnée à travers une référence
+partagée &, en déplaçant la vérification à l'EXÉCUTION.
+
+Cell<T> : pour les types Copy. On remplace la valeur en entier, jamais de
+référence vers l'intérieur, donc aucun risque.
+   use std::cell::Cell;
+
+   struct Compteur {
+       appels: Cell<u32>,
+   }
+
+   impl Compteur {
+       fn appeler(&self) {                       // &self, pas &mut self !
+           self.appels.set(self.appels.get() + 1);
+       }
+   }
+
+RefCell<T> : pour tous les types. On emprunte à l'exécution :
+   use std::cell::RefCell;
+
+   let donnees = RefCell::new(vec![1, 2, 3]);
+
+   donnees.borrow_mut().push(4);                 // emprunt modifiable
+   println!("{:?}", donnees.borrow());           // emprunt partagé
+
+RefCell compte les emprunts en cours. Si la règle d'or est violée, c'est une
+PANIQUE (pas un comportement indéfini) :
+   let r1 = donnees.borrow_mut();
+   let r2 = donnees.borrow_mut();    // PANIQUE : RefCell already borrowed
+   // try_borrow_mut() renvoie un Result au lieu de paniquer
+
+LA COMBINAISON Rc<RefCell<T>> : plusieurs propriétaires qui peuvent modifier.
+   use std::cell::RefCell;
+   use std::rc::Rc;
+
+   #[derive(Debug)]
+   struct Compte {
+       solde: i64,
+   }
+
+   let compte = Rc::new(RefCell::new(Compte { solde: 100 }));
+   let titulaire1 = Rc::clone(&compte);
+   let titulaire2 = Rc::clone(&compte);
+
+   titulaire1.borrow_mut().solde -= 30;
+   titulaire2.borrow_mut().solde += 50;
+   println!("{}", compte.borrow().solde);        // 120
+
+C'est pratique mais ça a un coût (vérifications à l'exécution) et ça cache
+les relations de possession. Si tu en mets partout, c'est souvent le signe
+qu'il faut repenser la structure du programme.
+
+
+14.6 Weak<T> : casser les cycles
+--------------------------------
+Rc a une faiblesse : si A pointe vers B et B pointe vers A, les deux
+compteurs ne tombent jamais à 0. La mémoire n'est jamais libérée : c'est une
+FUITE. (Rust garantit l'absence de corruption mémoire, pas l'absence de
+fuites.)
+
+La solution : Weak<T>, une référence "faible" qui ne compte pas comme
+propriétaire. Elle ne garde pas la donnée en vie, et il faut vérifier qu'elle
+existe encore avant de l'utiliser.
+
+Exemple typique : un arbre où les parents POSSÈDENT leurs enfants (Rc), et les
+enfants connaissent leur parent (Weak).
+
+   use std::cell::RefCell;
+   use std::rc::{Rc, Weak};
+
+   #[derive(Debug)]
+   struct Noeud {
+       valeur: i32,
+       parent: RefCell<Weak<Noeud>>,
+       enfants: RefCell<Vec<Rc<Noeud>>>,
+   }
+
+   let feuille = Rc::new(Noeud {
+       valeur: 3,
+       parent: RefCell::new(Weak::new()),         // pas encore de parent
+       enfants: RefCell::new(vec![]),
+   });
+
+   let branche = Rc::new(Noeud {
+       valeur: 5,
+       parent: RefCell::new(Weak::new()),
+       enfants: RefCell::new(vec![Rc::clone(&feuille)]),
+   });
+
+   *feuille.parent.borrow_mut() = Rc::downgrade(&branche);   // Rc -> Weak
+
+   // upgrade() : Weak -> Option<Rc>. None si le parent a été détruit.
+   if let Some(parent) = feuille.parent.borrow().upgrade() {
+       println!("le parent de 3 est {}", parent.valeur);
+   }
+
+   Rc::strong_count(&branche)    // 1
+   Rc::weak_count(&branche)      // 1
+
+
+14.7 Arc<T> et Mutex<T> : pour les threads
+------------------------------------------
+   Arc<T>     comme Rc, mais le compteur est ATOMIQUE : utilisable entre
+              threads (un peu plus lent que Rc).
+   Mutex<T>   comme RefCell, mais pour les threads : lock() attend que la
+              donnée soit libre au lieu de paniquer.
+   RwLock<T>  plusieurs lecteurs OU un seul écrivain.
+
+   use std::sync::{Arc, Mutex};
+   let compteur = Arc::new(Mutex::new(0));
+   {
+       let mut valeur = compteur.lock().unwrap();   // attend le verrou
+       *valeur += 1;
+   }                                                // verrou relâché ici
+
+Détails et exemples complets au chapitre 17.
+
+
+14.8 Les pointeurs bruts : *const T et *mut T
+---------------------------------------------
+Les pointeurs bruts sont les pointeurs du C : une adresse, sans aucune
+garantie. Ils peuvent être nuls, pendants, mal alignés, pointer n'importe où,
+et plusieurs *mut peuvent désigner la même donnée.
+
+Les CRÉER est autorisé (sûr). Les DÉRÉFÉRENCER exige unsafe.
+
+   let mut x = 10;
+
+   let p1 = &raw const x;          // *const i32  (Rust 1.82+)
+   let p2 = &raw mut x;            // *mut i32
+   let p3 = &x as *const i32;      // ancienne écriture, depuis une référence
+   let p4: *mut i32 = &mut x;      // conversion implicite &mut -> *mut
+
+   unsafe {
+       *p2 = 20;                   // écrire
+       println!("{}", *p1);        // lire : 20
+   }
+
+   println!("{:p}", p1);           // afficher l'adresse
+
+Pointeur nul :
+   let nul: *const i32 = std::ptr::null();
+   let nul_mut: *mut i32 = std::ptr::null_mut();
+   if nul.is_null() { }
+
+Un pointeur vers une adresse quelconque (compile, mais le déréférencer est
+presque certainement un plantage) :
+   let adresse = 0x012345usize;
+   let p = adresse as *const i32;
+
+L'ARITHMÉTIQUE DES POINTEURS (unité = taille du type, comme en C) :
+   let t = [10, 20, 30, 40];
+   let p: *const i32 = t.as_ptr();        // adresse du premier élément
+   unsafe {
+       println!("{}", *p.add(2));          // 30  (p + 2 éléments)
+       let fin = p.add(4);                 // une case après la fin : autorisé
+       println!("{}", fin.offset_from(p)); // 4   (différence en éléments)
+   }
+   let q = p.wrapping_add(100);            // sûr : ne vérifie rien et ne
+                                           // suppose rien, mais ne déréférence
+                                           // pas q !
+
+   add, sub, offset et offset_from sont unsafe : le résultat doit rester
+   dans le même bloc mémoire (ou une case après la fin), comme en C.
+
+Lire et écrire sans référence intermédiaire :
+   unsafe {
+       let v = p.read();                   // copie la valeur pointée
+       p2.write(5);                        // écrit sans lire l'ancienne valeur
+   }
+
+L'équivalent de memcpy et memmove :
+   std::ptr::copy_nonoverlapping(src, dst, n)   // memcpy : zones séparées
+   std::ptr::copy(src, dst, n)                  // memmove : chevauchement OK
+   std::ptr::write_bytes(dst, 0, n)             // memset
+
+Voir les octets d'une valeur (comme avec unsigned char * en C) :
+   let n: u32 = 0x12345678;
+   let octets = n.to_le_bytes();               // sûr, sans unsafe : [78,56,34,12]
+   // ou avec un pointeur brut :
+   let p = &raw const n as *const u8;
+   let s = unsafe { std::slice::from_raw_parts(p, 4) };
+
+Convertir entre types de pointeurs :
+   let p8 = p_u32 as *const u8;         // change le type pointé
+   let pm = p_const as *mut i32;        // enlève le const (dangereux)
+   let pv = p.cast::<u8>();             // version méthode
+
+NonNull<T> : un *mut T garanti non nul. Option<NonNull<T>> a la taille d'un
+pointeur. C'est ce qu'utilisent Vec, Box et Rc en interne.
+
+
+14.9 unsafe : ce qu'il permet et ce qu'il ne permet pas
+-------------------------------------------------------
+Un bloc unsafe { } autorise cinq choses que le compilateur ne peut pas
+vérifier :
+   1. déréférencer un pointeur brut ;
+   2. appeler une fonction unsafe (dont les fonctions C) ;
+   3. lire ou modifier une static mut ;
+   4. implémenter un trait unsafe (comme Send ou Sync) ;
+   5. lire un champ d'une union.
+Depuis l'édition 2024, il faut aussi écrire unsafe pour les blocs extern
+(unsafe extern "C" { }) et certains attributs (#[unsafe(no_mangle)]), car ils
+peuvent casser les garanties de Rust.
+
+Ce que unsafe NE fait PAS : il ne désactive PAS le borrow checker. Les
+références & et &mut restent vérifiées dans un bloc unsafe. unsafe dit
+seulement : "moi, programmeur, je garantis que ce que le compilateur ne peut
+pas vérifier est correct".
+
+Une FONCTION unsafe a des conditions que l'appelant doit respecter :
+   /// # Safety
+   /// `p` doit pointer vers un i32 valide et initialisé.
+   unsafe fn lire(p: *const i32) -> i32 {
+       unsafe { *p }        // édition 2024 : même dans une unsafe fn, chaque
+   }                        // opération unsafe doit être dans un bloc unsafe
+                            // (sinon avertissement E0133)
+
+   let x = 5;
+   let v = unsafe { lire(&raw const x) };
+
+Convention : chaque bloc unsafe est précédé d'un commentaire // SAFETY: qui
+explique POURQUOI il est correct. (clippy peut l'exiger.)
+
+LE BON USAGE : construire une abstraction SÛRE autour d'un peu de code
+unsafe. Exemple : split_at_mut (7.10) ne peut pas être écrit sans unsafe, car
+le compilateur refuserait deux &mut vers la même slice. Voici comment on
+l'implémente :
+
+   fn couper_en_deux(t: &mut [i32], milieu: usize) -> (&mut [i32], &mut [i32]) {
+       let longueur = t.len();
+       let p = t.as_mut_ptr();
+       assert!(milieu <= longueur);           // on vérifie la condition
+       // SAFETY: les deux slices sont disjointes ([0, milieu[ et
+       // [milieu, longueur[), et milieu <= longueur a été vérifié.
+       unsafe {
+           (
+               std::slice::from_raw_parts_mut(p, milieu),
+               std::slice::from_raw_parts_mut(p.add(milieu), longueur - milieu),
+           )
+       }
+   }
+
+L'UTILISATEUR de couper_en_deux n'écrit aucun unsafe et ne peut pas l'utiliser
+de travers. Toute la bibliothèque standard (Vec, String, HashMap) est bâtie
+comme ça.
+
+Les comportements indéfinis possibles en unsafe (les mêmes pièges qu'en C, et
+quelques autres) :
+   - déréférencer un pointeur nul, pendant ou mal aligné ;
+   - créer deux &mut vers la même donnée, ou modifier une donnée pendant
+     qu'une & existe (même via des pointeurs bruts) ;
+   - créer une valeur invalide : un bool qui vaut 2, un char hors Unicode, un
+     enum avec une étiquette inconnue, une référence nulle ;
+   - lire de la mémoire non initialisée (utilise MaybeUninit<T>) ;
+   - un accès concurrent non synchronisé (data race) ;
+   - dépasser les bornes d'un bloc avec add/offset.
+
+Outil indispensable : Miri, un interpréteur qui détecte ces comportements
+indéfinis pendant l'exécution des tests.
+   rustup +nightly component add miri
+   cargo +nightly miri test
+
+
+14.10 static mut et ses alternatives
+------------------------------------
+   static mut COMPTEUR: u32 = 0;
+
+   fn incrementer() {
+       // SAFETY: programme sans threads, aucun autre accès simultané
+       unsafe {
+           COMPTEUR += 1;
+       }
+   }
+
+Depuis l'édition 2024, créer une RÉFÉRENCE vers une static mut (&COMPTEUR, ou
+println!("{}", COMPTEUR) qui en crée une) est refusé par défaut, car c'est
+presque toujours un comportement indéfini dès qu'il y a des threads ou des
+interruptions. Si c'est vraiment nécessaire, passe par un pointeur brut :
+&raw const COMPTEUR.
+
+Préfère les alternatives sûres :
+   use std::sync::atomic::{AtomicU32, Ordering};
+   static COMPTEUR_SUR: AtomicU32 = AtomicU32::new(0);    // pas de mut !
+   COMPTEUR_SUR.fetch_add(1, Ordering::Relaxed);
+
+   static CONFIG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+   static TABLE: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+(Les atomiques sont dans core : ils existent aussi en no_std.)
+
+
+14.11 Les unions
+----------------
+   #[repr(C)]
+   union IntOuFloat {
+       i: u32,
+       f: f32,
+   }
+
+   let u = IntOuFloat { f: 1.0 };
+   let bits = unsafe { u.i };        // 0x3f800000 : lecture unsafe
+
+Les champs doivent être Copy (ou enveloppés dans ManuallyDrop). Pour
+simplement réinterpréter les bits d'un flottant, il existe une méthode sûre :
+1.0_f32.to_bits().
+
+
+14.12 Les pointeurs de fonction
+-------------------------------
+Le type fn(A, B) -> R est un pointeur vers une fonction (8 octets). Une
+closure qui ne capture rien peut s'y convertir.
+
+   fn addition(a: i32, b: i32) -> i32 { a + b }
+   fn multiplication(a: i32, b: i32) -> i32 { a * b }
+
+   let op: fn(i32, i32) -> i32 = addition;
+   println!("{}", op(3, 4));                // 7
+
+   let operations: [fn(i32, i32) -> i32; 3] = [
+       addition,
+       multiplication,
+       |a, b| a - b,                        // closure sans capture : OK
+   ];
+   println!("{}", operations[1](5, 6));     // 30
+
+   fn appliquer(f: fn(i32) -> i32, x: i32) -> i32 { f(x) }
+
+fn (pointeur de fonction) contre Fn (trait de closure) :
+   - fn(i32) -> i32 : un seul type concret, pas de capture possible, utile
+     pour les tables et le code bas niveau (vecteurs d'interruption).
+   - impl Fn(i32) -> i32 : accepte les fonctions ET les closures qui
+     capturent. À préférer en général.
+
+Pour être appelé depuis du C ou de l'assembleur, une fonction doit utiliser
+la convention d'appel C :
+   extern "C" fn rappel(x: i32) -> i32 { x * 2 }
+   let p: extern "C" fn(i32) -> i32 = rappel;
+
+
+14.13 Accéder au matériel (MMIO)
+--------------------------------
+Même exemple que dans le cours de C : la mémoire texte VGA à 0xB8000. Dans un
+noyau, on écrit à une adresse fixe avec write_volatile, pour que le
+compilateur ne supprime pas l'écriture.
+
+   const VGA: *mut u16 = 0xB8000 as *mut u16;
+
+   fn ecrire_ecran(message: &str) {
+       for (i, octet) in message.bytes().enumerate() {
+           let case = (0x0F_u16 << 8) | octet as u16;     // blanc sur noir
+           // SAFETY: la mémoire VGA fait 80x25 cases, accessible en mode
+           // texte, et i reste inférieur à 2000.
+           unsafe {
+               VGA.add(i).write_volatile(case);
+           }
+       }
+   }
+
+(Comme en C, ce code ne fonctionne que dans un noyau ou un bootloader. Dans
+un programme Linux normal, il provoque une erreur de segmentation.)
+
+Pour un vrai pilote, on encapsule ces accès dans une structure qui garantit
+les bornes, afin que le reste du noyau n'ait jamais besoin d'unsafe.
+
+
+14.14 Appeler du C et être appelé par du C (FFI)
+------------------------------------------------
+Appeler une fonction C (ici abs de la libc) :
+   unsafe extern "C" {
+       fn abs(x: i32) -> i32;            // appeler exige unsafe
+       safe fn labs(x: i64) -> i64;      // "safe" : on garantit qu'elle est
+   }                                     // toujours sûre (Rust 1.82+)
+
+   let a = unsafe { abs(-5) };
+   let b = labs(-7);                     // pas besoin d'unsafe
+
+Exposer une fonction Rust au C ou à l'assembleur :
+   #[unsafe(no_mangle)]                  // garde le nom tel quel (édition 2024)
+   pub extern "C" fn calcul_rust(x: i32) -> i32 {
+       x * 2
+   }
+
+Structures partagées : toujours #[repr(C)].
+Chaînes : std::ffi::CString (pour envoyer au C) et CStr (pour lire depuis le
+C), car les chaînes C se terminent par \0 alors que les &str Rust ont une
+longueur.
+
+
+14.15 Tableau de correspondance C / Rust
+----------------------------------------
+   C                               Rust
+   ------------------------------  ----------------------------------------------
+   int *p = &x;   (lecture)        let p = &x;                 (&i32)
+   int *p = &x;   (écriture)       let p = &mut x;             (&mut i32)
+   *p = 5;                         *p = 5;
+   const int *p                    &i32
+   p->champ                        p.champ                     (auto-deref)
+   int *p = NULL;                  let p: Option<&i32> = None;
+   if (p != NULL)                  if let Some(r) = p
+   void f(int *t, size_t n)        fn f(t: &[i32])             (slice)
+   char *s / const char *s         &mut str / &str  (ou String possédée)
+   malloc + free                   Box::new(...) + automatique
+   tableau dynamique à la main     Vec<T>
+   comptage de références manuel   Rc<T> / Arc<T>
+   void *                          *const () / *mut u8, ou génériques <T>
+   struct de pointeurs de fonction trait + dyn Trait
+   int (*f)(int)                   fn(i32) -> i32
+   pointeur quelconque             *const T / *mut T  + unsafe
+   p + n                           unsafe { p.add(n) }
+   memcpy / memmove / memset       ptr::copy_nonoverlapping / copy / write_bytes
+   volatile + écriture             ptr::write_volatile
+   restrict                        automatique pour chaque &mut
+   union                           enum (sûr) ou union (unsafe)
+   pointeur pendant                refusé à la compilation (hors unsafe)
+   double free                     impossible (hors unsafe)
+
+
+EXERCICES DU CHAPITRE 14
+------------------------
+14.1 Implémente une pile (stack) avec une liste chaînée :
+     struct Pile { tete: Option<Box<Noeud>> } et struct Noeud { valeur: i32,
+     suivant: Option<Box<Noeud>> }, avec empiler, depiler -> Option<i32> et
+     sommet -> Option<&i32>. (Indice : Option::take.)
+14.2 Écris un arbre binaire de recherche avec Option<Box<Arbre>> et les
+     méthodes inserer(&mut self, v: i32) et contient(&self, v: i32) -> bool.
+14.3 Crée deux variables Rc<RefCell<Vec<String>>> qui partagent la même
+     liste. Ajoute des éléments par l'une et affiche-les par l'autre. Affiche
+     le compteur de références à chaque étape.
+14.4 Réécris la fonction echanger (7.2) avec des pointeurs bruts *mut i32 et
+     unsafe, puis écris le commentaire SAFETY.
+14.5 Avec un pointeur brut et add, parcours un tableau [u32; 5] et affiche
+     chaque élément, puis fais la même chose de façon sûre avec un
+     itérateur. Compare.
+14.6 Provoque volontairement une panique de RefCell (deux borrow_mut) et lis
+     le message.
+
+
+================================================================================
+ 15. MODULES, CRATES, CARGO ET TESTS
+================================================================================
+
+15.1 Le vocabulaire
+-------------------
+   CRATE     l'unité de compilation : un exécutable (binaire) ou une
+             bibliothèque. Sa racine est src/main.rs ou src/lib.rs.
+   PACKAGE   un projet Cargo (un Cargo.toml) : une bibliothèque au plus, et
+             autant de binaires qu'on veut.
+   MODULE    un espace de noms à l'intérieur d'une crate, pour organiser le
+             code et contrôler la visibilité.
+
+
+15.2 Les modules et la visibilité
+---------------------------------
+Par défaut, TOUT est PRIVÉ au module qui le contient. pub rend public.
+
+   mod geometrie {
+       pub struct Point {
+           pub x: f64,          // les champs sont privés par défaut aussi
+           pub y: f64,
+       }
+
+       pub fn distance(a: &Point, b: &Point) -> f64 {
+           carre(a.x - b.x) + carre(a.y - b.y)
+       }
+
+       fn carre(v: f64) -> f64 {    // privée : invisible hors du module
+           v * v
+       }
+
+       pub mod formes {             // module imbriqué
+           pub fn cercle() { }
+       }
+   }
+
+   fn main() {
+       let a = geometrie::Point { x: 0.0, y: 0.0 };
+       geometrie::formes::cercle();
+       // geometrie::carre(2.0);    // ERREUR : fonction privée
+   }
+
+Variantes :
+   pub              visible partout
+   pub(crate)       visible dans toute la crate, pas au-dehors
+   pub(super)       visible dans le module parent
+   (rien)           privé au module et à ses sous-modules
+
+Pour un enum pub, toutes les variantes sont publiques.
+Une struct avec un champ privé ne peut être construite que dans son module :
+c'est ainsi qu'on garantit des invariants (on force le passage par new).
+
+
+15.3 use et les chemins
+-----------------------
+   use geometrie::Point;                 // raccourci
+   use geometrie::{distance, formes};    // plusieurs à la fois
+   use std::collections::HashMap;
+   use std::io::{self, Write};           // io lui-même et io::Write
+   use std::fmt::Result as FmtResult;    // renommage
+   use geometrie::*;                     // tout (à éviter hors des tests)
+
+Chemins :
+   crate::geometrie::Point      chemin absolu depuis la racine de la crate
+   self::sous_module            depuis le module courant
+   super::fonction              depuis le module parent
+
+Réexporter : pub use interne::Truc;  (rend Truc accessible par ton module)
+
+
+15.4 Les modules dans des fichiers
+----------------------------------
+   src/
+   ├── main.rs          contient : mod geometrie;
+   ├── geometrie.rs     contenu du module geometrie
+   └── geometrie/
+       └── formes.rs    geometrie.rs contient : pub mod formes;
+
+mod geometrie; (avec un point-virgule) dit au compilateur de charger le
+fichier geometrie.rs (ou geometrie/mod.rs, l'ancienne convention).
+
+Pas besoin de fichiers d'en-tête ni d'include guards comme en C : le
+compilateur connaît déjà toute la crate.
+
+
+15.5 Les dépendances
+--------------------
+Les bibliothèques de la communauté sont sur crates.io, et leur documentation
+sur docs.rs.
+
+   cargo add rand                  ajoute la dernière version dans Cargo.toml
+
+   [dependencies]
+   rand = "0.9"                    exemple : "0.9" accepte toute version 0.9.x
+                                   compatible (règles semver)
+
+Au prochain cargo build, Cargo télécharge et compile tout. Le fichier
+Cargo.lock enregistre les versions exactes utilisées, pour que les
+compilations soient reproductibles.
+
+Profils de compilation, dans Cargo.toml :
+   [profile.release]
+   opt-level = 3        optimisation (0 à 3, "s" et "z" pour la taille)
+   lto = true           optimisation à l'édition de liens
+   panic = "abort"
+   debug = true         garder les infos de débogage en release
+
+
+15.6 Les tests
+--------------
+Tests unitaires, dans le même fichier que le code :
+
+   pub fn ajouter(a: i32, b: i32) -> i32 {
+       a + b
+   }
+
+   #[cfg(test)]                   // compilé seulement par cargo test
+   mod tests {
+       use super::*;              // importe tout le module parent
+
+       #[test]
+       fn addition_simple() {
+           assert_eq!(ajouter(2, 3), 5);
+       }
+
+       #[test]
+       #[should_panic(expected = "division")]
+       fn panique_attendue() {
+           panic!("division par zéro");
+       }
+
+       #[test]
+       fn avec_result() -> Result<(), String> {
+           if ajouter(1, 1) == 2 { Ok(()) } else { Err("raté".into()) }
+       }
+   }
+
+   cargo test                          lance tous les tests
+   cargo test addition                 seulement ceux dont le nom contient
+                                       "addition"
+   cargo test -- --nocapture           affiche les println! des tests
+
+Tests d'intégration : dans un dossier tests/ à la racine du projet. Chaque
+fichier est une crate séparée qui utilise ta bibliothèque comme un
+utilisateur externe.
+
+Tests de documentation : les exemples dans les commentaires /// sont
+compilés et exécutés par cargo test.
+   /// Additionne deux nombres.
+   ///
+   /// ```
+   /// assert_eq!(mon_crate::ajouter(2, 2), 4);
+   /// ```
+   pub fn ajouter(a: i32, b: i32) -> i32 { a + b }
+
+
+EXERCICES DU CHAPITRE 15
+------------------------
+15.1 Crée un projet avec un module compte (dans compte.rs) contenant une
+     struct Compte à champs privés, et des fonctions publiques new, deposer
+     et solde. Vérifie que main ne peut pas modifier le solde directement.
+15.2 Écris au moins trois tests pour la fonction est_premier (5.2), dont un
+     pour 0 et 1.
+
+
+================================================================================
+ 16. LES MACROS ET LES ATTRIBUTS
+================================================================================
+
+16.1 Pourquoi des macros ?
+--------------------------
+Une macro génère du code à la compilation. Contrairement aux macros du C
+(simple remplacement de texte), les macros Rust travaillent sur l'arbre de
+syntaxe : elles sont typées au final, hygiéniques (leurs variables internes ne
+se mélangent pas aux tiennes) et ne souffrent pas des pièges de priorité.
+
+Elles peuvent faire ce qu'une fonction ne peut pas : accepter un nombre
+variable d'arguments (println!), générer des structures ou des
+implémentations (derive).
+
+
+16.2 Les macros déclaratives : macro_rules!
+-------------------------------------------
+   macro_rules! carre {
+       ($x:expr) => {
+           $x * $x
+       };
+   }
+
+   carre!(2 + 1)          // 9, pas 5 : $x est une expression entière,
+                          // le piège du C n'existe pas
+
+Plusieurs règles et répétitions :
+   macro_rules! maximum {
+       ($x:expr) => { $x };
+       ($x:expr, $($reste:expr),+) => {
+           {
+               let a = $x;
+               let b = maximum!($($reste),+);    // récursion
+               if a > b { a } else { b }
+           }
+       };
+   }
+
+   maximum!(3, 9, 2, 7)   // 9
+
+   macro_rules! ma_liste {
+       ($($element:expr),* $(,)?) => {           // $(,)? : virgule finale
+           {                                     // facultative
+               let mut v = Vec::new();
+               $( v.push($element); )*           // répété pour chaque élément
+               v
+           }
+       };
+   }
+
+Les types de fragments :
+   expr      une expression           ident     un identifiant (nom)
+   ty        un type                  pat       un motif
+   block     un bloc { }              stmt      une instruction
+   literal   un littéral              path      un chemin (std::fmt)
+   tt        un seul "token tree"     item      une fonction, struct...
+   lifetime  une durée de vie         vis       une visibilité (pub...)
+   meta      le contenu d'un attribut
+
+Répétitions : $( ... ),* (zéro ou plus), $( ... ),+ (un ou plus),
+$( ... )? (zéro ou un).
+
+Exemple qui génère du code : des fonctions d'accès à des registres.
+   macro_rules! registre {
+       ($nom:ident, $adresse:expr) => {
+           fn $nom() -> *mut u32 {
+               $adresse as *mut u32
+           }
+       };
+   }
+   registre!(controle, 0x4000_0000);
+   registre!(statut, 0x4000_0004);
+
+
+16.3 Les macros procédurales
+----------------------------
+Ce sont des programmes Rust qui reçoivent du code et en produisent. Elles se
+placent dans une crate à part. Trois sortes :
+   #[derive(MonTrait)]             génère une implémentation (comme Debug)
+   #[mon_attribut]                 transforme l'élément annoté
+   ma_macro!(...)                  comme macro_rules!, mais programmée
+
+Tu les UTILISERAS souvent (serde, tokio, clap...) avant d'en écrire.
+
+
+16.4 Les macros de la bibliothèque standard
+-------------------------------------------
+Affichage et texte :
+   println!  print!  eprintln!  eprint!      afficher
+   format!                                   construire une String
+   write!  writeln!                          écrire dans un tampon (Display)
+   format_args!                              base de toutes les précédentes
+   concat!("a", 1, true)                     chaîne constante "a1true"
+   stringify!(x + y)                         le code en texte : "x + y"
+
+Collections :
+   vec![1, 2, 3]   vec![0; 10]
+
+Erreurs et vérifications :
+   panic!  assert!  assert_eq!  assert_ne!  debug_assert!
+   unreachable!  todo!  unimplemented!
+   compile_error!("message")                 erreur à la compilation
+
+Débogage :
+   dbg!(expr)                affiche fichier:ligne, l'expression et sa valeur,
+                             puis renvoie la valeur
+
+Motifs :
+   matches!(valeur, Motif)
+
+Compilation et environnement :
+   file!()  line!()  column!()  module_path!()
+   env!("VARIABLE")          variable d'environnement à la compilation
+   option_env!("VARIABLE")   pareil, Option
+   cfg!(target_os = "linux") bool selon la configuration
+   include_str!("fichier.txt")    contenu d'un fichier en &'static str
+   include_bytes!("police.bin")   contenu en &'static [u8; N] (l'équivalent du
+                                  #embed de C23)
+
+Threads :
+   thread_local! { static X: Cell<u32> = Cell::new(0); }
+
+
+16.5 Les attributs
+------------------
+   #[attribut]      s'applique à l'élément qui suit
+   #![attribut]     s'applique à l'élément qui CONTIENT (le fichier, la crate)
+                    ex : #![no_std] en haut de main.rs
+
+Génération de code :
+   #[derive(Debug, Clone, PartialEq)]
+
+Compilation conditionnelle (l'équivalent de #ifdef) :
+   #[cfg(test)]                         seulement pour les tests
+   #[cfg(debug_assertions)]             seulement en mode debug
+   #[cfg(target_os = "linux")]
+   #[cfg(target_arch = "x86_64")]
+   #[cfg(feature = "reseau")]           option de compilation Cargo
+   #[cfg(not(windows))]  #[cfg(all(unix, target_pointer_width = "64"))]
+
+Avertissements :
+   #[allow(dead_code)]                  autorise
+   #[warn(missing_docs)]                avertit
+   #[deny(unsafe_code)]                 transforme en erreur
+   #[expect(unused_variables)]          autorise, mais avertit si l'alerte
+                                        ne se produit plus
+   #![forbid(unsafe_code)]              interdit unsafe dans toute la crate
+
+Documentation et API :
+   #[must_use]                          avertit si le résultat est ignoré
+   #[deprecated(note = "utiliser f2")]
+   #[non_exhaustive]                    d'autres variantes ou champs pourront
+                                        être ajoutés (force un _ dans les match
+                                        des utilisateurs)
+   #[doc(hidden)]
+
+Optimisation :
+   #[inline]  #[inline(always)]  #[inline(never)]
+   #[cold]                              fonction rarement appelée
+   #[track_caller]                      une panique indique l'appelant
+
+Disposition mémoire :
+   #[repr(C)]                           disposition du C
+   #[repr(u8)] / #[repr(i32)]           type de l'étiquette d'un enum
+   #[repr(transparent)]                 même disposition que l'unique champ
+   #[repr(packed)]                      pas de remplissage
+   #[repr(align(4096))]                 alignement minimal
+
+Bas niveau (unsafe depuis l'édition 2024) :
+   #[unsafe(no_mangle)]                 nom de symbole inchangé
+   #[unsafe(link_section = ".boot")]    placer dans une section précise
+   #[unsafe(export_name = "nom")]
+
+Spécifiques :
+   #[test]  #[should_panic]  #[ignore]
+   #[panic_handler]                     no_std (chapitre 18)
+   #[global_allocator]                  choisir l'allocateur
+
+
+================================================================================
+ 17. LA CONCURRENCE (THREADS)
+================================================================================
+
+17.1 Créer des threads
+----------------------
+   use std::thread;
+   use std::time::Duration;
+
+   let poignee = thread::spawn(|| {
+       for i in 1..5 {
+           println!("thread : {i}");
+           thread::sleep(Duration::from_millis(10));
+       }
+       42                              // valeur renvoyée par le thread
+   });
+
+   println!("main continue");
+   let resultat = poignee.join().unwrap();    // attend la fin : 42
+
+Un thread lancé avec spawn peut survivre à la fonction qui l'a créé. Il ne
+peut donc pas emprunter les variables locales : il faut les DÉPLACER avec
+move.
+   let v = vec![1, 2, 3];
+   let p = thread::spawn(move || {
+       println!("{v:?}");              // v appartient maintenant au thread
+   });
+   p.join().unwrap();
+
+Les threads délimités (scoped) PEUVENT emprunter, car ils sont garantis
+terminés avant la fin du bloc :
+   let mut total = 0;
+   let donnees = [1, 2, 3, 4];
+   thread::scope(|s| {
+       s.spawn(|| println!("{}", donnees.len()));
+       s.spawn(|| total = donnees.iter().sum());
+   });                                 // tous les threads sont finis ici
+   println!("{total}");
+
+
+17.2 Partager des données : Arc<Mutex<T>>
+-----------------------------------------
+   use std::sync::{Arc, Mutex};
+   use std::thread;
+
+   let compteur = Arc::new(Mutex::new(0));
+   let mut poignees = vec![];
+
+   for _ in 0..10 {
+       let compteur = Arc::clone(&compteur);
+       poignees.push(thread::spawn(move || {
+           let mut n = compteur.lock().unwrap();
+           *n += 1;
+       }));                            // verrou relâché quand n est détruit
+   }
+
+   for p in poignees {
+       p.join().unwrap();
+   }
+   println!("{}", *compteur.lock().unwrap());     // 10, toujours
+
+Essaie de remplacer Arc par Rc : le compilateur refuse, car Rc n'est pas sûr
+entre threads. Essaie d'enlever le Mutex : le compilateur refuse de modifier
+une donnée partagée. Les accès concurrents non protégés (data races) sont
+IMPOSSIBLES en Rust sûr.
+
+(Les interblocages, deadlocks, restent possibles : deux threads qui
+s'attendent mutuellement. Rust ne peut pas tout empêcher.)
+
+Pour un simple compteur, les atomiques sont plus légers :
+   use std::sync::atomic::{AtomicUsize, Ordering};
+   let compteur = Arc::new(AtomicUsize::new(0));
+   compteur.fetch_add(1, Ordering::SeqCst);
+
+
+17.3 Communiquer par messages : les canaux
+------------------------------------------
+   use std::sync::mpsc;               // multiple producers, single consumer
+
+   let (emetteur, recepteur) = mpsc::channel();
+
+   for id in 0..3 {
+       let tx = emetteur.clone();
+       thread::spawn(move || {
+           tx.send(format!("bonjour du thread {id}")).unwrap();
+       });
+   }
+   drop(emetteur);                    // sinon la boucle ne se termine jamais
+
+   for message in recepteur {         // reçoit jusqu'à ce que tous les
+       println!("{message}");         // émetteurs soient détruits
+   }
+
+
+17.4 Send et Sync : comment Rust le garantit
+--------------------------------------------
+Deux traits marqueurs, implémentés automatiquement par le compilateur :
+   Send    le type peut être DÉPLACÉ vers un autre thread
+   Sync    le type peut être PARTAGÉ (&T) entre threads
+
+   i32, String, Vec<T>, Arc<T>, Mutex<T>    Send et Sync
+   Rc<T>                                    ni l'un ni l'autre
+   RefCell<T>, Cell<T>                      Send mais pas Sync
+   *const T, *mut T                         ni l'un ni l'autre
+
+thread::spawn exige que la closure soit Send et 'static. Si tu essaies d'y
+mettre un Rc, le compilateur refuse en expliquant que Rc n'est pas Send.
+Implémenter Send ou Sync à la main est unsafe.
+
+
+17.5 Et async ?
+---------------
+Rust propose aussi async / await pour gérer des milliers de tâches
+d'entrées-sorties (serveurs réseau) sans créer autant de threads. Le langage
+fournit la syntaxe, mais l'exécuteur vient d'une bibliothèque (tokio est la
+plus utilisée). C'est un sujet à part entière, à aborder une fois les
+chapitres précédents bien maîtrisés.
+
+
+EXERCICES DU CHAPITRE 17
+------------------------
+17.1 Découpe un Vec de 1 000 000 de nombres en 4 morceaux (chunks), calcule
+     la somme de chaque morceau dans un thread délimité (thread::scope), puis
+     additionne les résultats.
+17.2 Crée 5 threads qui envoient chacun leur numéro au carré par un canal, et
+     affiche la somme reçue dans main.
+
+
+================================================================================
+ 18. RUST SANS BIBLIOTHÈQUE STANDARD (no_std)
+================================================================================
+
+18.1 Le principe
+----------------
+Pour un noyau, un bootloader ou un microcontrôleur, il n'y a pas de système
+d'exploitation, donc pas de std. On l'indique en haut de la crate :
+
+   #![no_std]
+
+Ce qui reste disponible : TOUT le langage (possession, emprunts, traits,
+génériques, itérateurs, pattern matching, unsafe, pointeurs) et la crate core
+(Option, Result, slices, &str, formatage avec core::fmt, atomiques, arithmétique
+sur les entiers).
+
+Ce qui disparaît : println!, les fichiers, les threads, et tout ce qui alloue
+(Box, Vec, String) tant qu'on ne fournit pas d'allocateur.
+
+Contrairement au C freestanding, où l'on perd aussi les chaînes et toute
+abstraction, en Rust no_std on garde les slices avec leur longueur, Option,
+Result, les itérateurs et la vérification des emprunts. C'est ce qui rend Rust
+si intéressant pour écrire un noyau.
+
+
+18.2 Ce qu'il faut fournir soi-même
+-----------------------------------
+1. Le gestionnaire de panique : que faire si le code panique ?
+      use core::panic::PanicInfo;
+
+      #[panic_handler]
+      fn panique(info: &PanicInfo) -> ! {
+          // afficher info à l'écran si possible, puis arrêter
+          loop {}
+      }
+
+2. panic = "abort" (Cargo.toml, profils dev et release), car le déroulement
+   de pile a besoin de std.
+
+3. Le point d'entrée : avec #![no_main], pas de fn main. On définit soi-même
+   le symbole attendu par le bootloader ou le linker, par exemple _start :
+      #[unsafe(no_mangle)]
+      pub extern "C" fn _start() -> ! {
+          loop {}
+      }
+
+4. Selon la cible, les fonctions memcpy, memmove, memset et memcmp, que le
+   compilateur peut appeler en cachette (comme gcc en C freestanding).
+   compiler_builtins les fournit sur certaines cibles ; sinon, on les active
+   avec l'option build-std-features = ["compiler-builtins-mem"] de Cargo, ou
+   on les écrit soi-même avec #[unsafe(no_mangle)].
+
+5. Si on veut Box, Vec et String : un allocateur global.
+      extern crate alloc;              // active la couche alloc
+      use alloc::vec::Vec;
+
+      #[global_allocator]
+      static ALLOCATEUR: MonAllocateur = MonAllocateur::new();
+      // MonAllocateur doit implémenter le trait unsafe GlobalAlloc
+
+
+18.3 Les cibles de compilation
+------------------------------
+Rust compile pour de nombreuses architectures. Pour un noyau x86-64 sans
+système :
+   rustup target add x86_64-unknown-none
+   cargo build --target x86_64-unknown-none
+
+Cette cible désactive déjà la red zone et les instructions SSE, exactement ce
+qu'on règle à la main avec -mno-red-zone en C. Pour des besoins plus précis,
+on peut écrire son propre fichier de cible JSON (avec la version nightly).
+
+Autres cibles courantes : thumbv7em-none-eabihf (microcontrôleurs ARM
+Cortex-M4F), riscv64gc-unknown-none-elf, aarch64-unknown-none.
+
+Voir la liste : rustc --print target-list
+
+
+18.4 Exemple complet 1 : Rust no_std appelé depuis NASM
+-------------------------------------------------------
+Même principe que dans le cours de C : _start en assembleur appelle une
+fonction Rust, et l'affichage passe par l'appel système write de Linux.
+
+--- entree.asm --- (le même fichier que pour le C)
+   bits 64
+
+   global _start
+   global sys_write
+   global sys_exit
+   extern principal
+
+   section .text
+
+   _start:
+       call principal          ; appelle la fonction Rust
+       mov edi, eax            ; code de sortie = valeur renvoyée
+       call sys_exit
+
+   ; long sys_write(int fd, const char *tampon, size_t taille)
+   sys_write:
+       mov rax, 1              ; numéro de l'appel système write
+       syscall
+       ret
+
+   ; void sys_exit(int code)
+   sys_exit:
+       mov rax, 60             ; numéro de l'appel système exit
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+
+--- principal.rs ---
+   #![no_std]
+
+   use core::panic::PanicInfo;
+
+   unsafe extern "C" {
+       fn sys_write(fd: i32, tampon: *const u8, taille: usize) -> isize;
+   }
+
+   fn afficher(texte: &str) {
+       // SAFETY: le pointeur et la longueur viennent d'une &str valide
+       unsafe {
+           sys_write(1, texte.as_ptr(), texte.len());
+       }
+   }
+
+   #[unsafe(no_mangle)]
+   pub extern "C" fn principal() -> i32 {
+       afficher("Bonjour depuis Rust, sans bibliothèque standard !\n");
+       42
+   }
+
+   #[panic_handler]
+   fn panique(_info: &PanicInfo) -> ! {
+       loop {}
+   }
+
+--- Compilation ---
+   nasm -f elf64 entree.asm -o entree.o
+   rustc --edition 2024 --crate-type staticlib -C panic=abort -C opt-level=2 \
+         principal.rs                          (produit libprincipal.a)
+   ld entree.o libprincipal.a -o sans_std
+   ./sans_std
+   echo $?                                     (affiche 42)
+
+Remarque : pas besoin d'écrire une fonction longueur comme en C. Une &str
+connaît sa taille : texte.len().
+
+
+18.5 Exemple complet 2 : tout en Rust, sans assembleur externe
+--------------------------------------------------------------
+La macro asm! (dans core) permet d'écrire de l'assembleur directement dans du
+Rust, en syntaxe Intel.
+
+--- nu.rs ---
+   #![no_std]
+   #![no_main]
+
+   use core::arch::asm;
+   use core::panic::PanicInfo;
+
+   fn sys_write(fd: i32, texte: &[u8]) {
+       // SAFETY: appel système write de Linux x86-64 avec un tampon valide
+       unsafe {
+           asm!(
+               "syscall",
+               inlateout("rax") 1usize => _,     // numéro de write, puis
+                                                 // valeur de retour ignorée
+               in("rdi") fd as usize,
+               in("rsi") texte.as_ptr(),
+               in("rdx") texte.len(),
+               lateout("rcx") _,                 // syscall écrase rcx et r11
+               lateout("r11") _,
+               options(nostack),
+           );
+       }
+   }
+
+   fn sys_exit(code: i32) -> ! {
+       // SAFETY: appel système exit, ne revient jamais
+       unsafe {
+           asm!("syscall", in("rax") 60usize, in("rdi") code as usize,
+                options(noreturn, nostack));
+       }
+   }
+
+   #[unsafe(no_mangle)]
+   pub extern "C" fn _start() -> ! {
+       sys_write(1, "Bonjour, 100 % Rust, sans libc ni NASM !\n".as_bytes());
+       sys_exit(0);
+   }
+
+   #[panic_handler]
+   fn panique(_info: &PanicInfo) -> ! {
+       sys_exit(101);
+   }
+
+--- Compilation ---
+   rustc --edition 2024 -C panic=abort -C opt-level=2 \
+         -C link-arg=-nostartfiles -C link-arg=-static \
+         -C relocation-model=static nu.rs
+   ./nu
+
+Pour aller plus loin vers un vrai noyau : le blog "Writing an OS in Rust" de
+Philipp Oppermann (os.phil-opp.com) construit un noyau x86-64 pas à pas, et le
+wiki OSDev reste une référence pour tout ce qui touche au matériel.
+
+
+EXERCICE DU CHAPITRE 18
+-----------------------
+18.1 Dans l'exemple 1, ajoute une fonction fn afficher_nombre(n: u32) qui
+     convertit le nombre en chiffres dans un tableau [u8; 10] sur la pile
+     (sans String ni allocation), puis l'affiche avec sys_write.
+
+
+================================================================================
+ 19. ANNEXES
+================================================================================
+
+19.1 Tous les mots-clés de Rust
+-------------------------------
+MOTS-CLÉS STRICTS (utilisables uniquement dans leur rôle) :
+   as        conversion (x as u8), renommage (use a as b)
+   async     fonction ou bloc asynchrone
+   await     attendre un résultat asynchrone (expr.await)
+   break     sortir d'une boucle (avec une valeur possible pour loop)
+   const     constante, const fn, bloc const { }
+   continue  passer au tour suivant
+   crate     racine de la crate dans un chemin (crate::module)
+   dyn       objet trait (dyn Trait)
+   else      branche alternative de if, let else
+   enum      définir une énumération
+   extern    bloc de fonctions externes, convention d'appel (extern "C")
+   false     booléen faux
+   fn        définir une fonction, type pointeur de fonction
+   for       boucle sur un itérateur ; impl Trait for Type
+   if        condition
+   impl      bloc d'implémentation ; impl Trait (type anonyme)
+   in        dans une boucle for
+   let       déclarer une variable
+   loop      boucle infinie
+   match     filtrage par motif
+   mod       déclarer un module
+   move      capture par possession dans une closure
+   mut       mutabilité (let mut, &mut, *mut)
+   pub       visibilité publique
+   ref       lier par référence dans un motif (Some(ref x), ref mut)
+   return    sortir d'une fonction
+   self      l'instance dans une méthode ; module courant dans un chemin
+   Self      le type en cours d'implémentation
+   static    variable globale ; durée de vie 'static
+   struct    définir une structure
+   super     module parent dans un chemin
+   trait     définir un trait
+   true      booléen vrai
+   type      alias de type (type Kilometres = u32;) ; type associé
+   unsafe    bloc, fonction, trait, bloc extern ou attribut non vérifié
+   use       importer
+   where     contraintes génériques
+   while     boucle conditionnelle
+
+MOTS RÉSERVÉS pour le futur (interdits comme noms) :
+   abstract  become  box  do  final  gen (édition 2024)  macro  override
+   priv  try  typeof  unsized  virtual  yield
+
+MOTS-CLÉS CONTEXTUELS (spéciaux seulement à certains endroits) :
+   'static   durée de vie du programme entier
+   union     définir une union
+   macro_rules   définir une macro déclarative
+   raw       dans &raw const / &raw mut
+   safe      dans un bloc unsafe extern : fonction sûre à appeler
+
+Pour utiliser un mot-clé comme nom (par exemple pour appeler une fonction C
+nommée "match") : r#match.
+
+
+19.2 Priorité des opérateurs
+----------------------------
+Du plus prioritaire (haut) au moins prioritaire (bas).
+
+   Opérateurs                                  Associativité
+   ------------------------------------------  -------------------------------
+   chemins  a::b                               -
+   appels de méthode  x.f()                    -
+   accès aux champs  x.champ                   gauche à droite
+   appels de fonction  f(), indexation  t[i]   -
+   ?                                           -
+   unaires  -x  *x  !x  &x  &mut x             -
+   as                                          gauche à droite
+   *  /  %                                     gauche à droite
+   +  -                                        gauche à droite
+   <<  >>                                      gauche à droite
+   &                                           gauche à droite
+   ^                                           gauche à droite
+   |                                           gauche à droite
+   ==  !=  <  >  <=  >=                        parenthèses obligatoires pour
+                                               enchaîner
+   &&                                          gauche à droite
+   ||                                          gauche à droite
+   ..  ..=                                     parenthèses obligatoires pour
+                                               enchaîner
+   =  +=  -=  *=  /=  %=  &=  |=  ^=  <<=  >>= droite à gauche
+   return  break  closures                     -
+
+Différences importantes avec le C :
+   - & ^ | passent AVANT les comparaisons : x & 1 == 0 fait (x & 1) == 0.
+   - -x as u32 fait (-x) as u32.
+   - Les comparaisons ne s'enchaînent pas : a < b < c ne compile pas.
+
+
+19.3 Autres erreurs fréquentes (voir aussi 7.12)
+------------------------------------------------
+E0308  mismatched types
+       Types différents : souvent un ; en trop à la fin d'une fonction, un
+       i32 donné à la place d'un i64, ou &String au lieu de String.
+
+E0384  cannot assign twice to immutable variable
+       -> ajoute mut.
+
+E0425  cannot find value `x` in this scope
+       Variable inconnue : faute de frappe ou hors de portée.
+
+E0433  failed to resolve: use of undeclared type
+       -> il manque un use (par exemple use std::collections::HashMap;).
+
+E0599  no method named `x` found
+       Méthode inexistante, ou trait non importé, ou #[derive] manquant (par
+       exemple .clone() sans Clone).
+
+E0277  the trait bound `T: Trait` is not satisfied
+       Le type n'implémente pas le trait demandé : {:?} sans Debug, == sans
+       PartialEq, un Rc envoyé dans un thread (pas Send).
+
+E0369  binary operation `+` cannot be applied
+       Opérateur non défini pour ce type.
+
+E0282  type annotations needed
+       Le compilateur ne peut pas deviner le type : souvent collect() ou
+       parse() -> précise le type (let v: Vec<i32> = ... ou parse::<i32>()).
+
+E0004  non-exhaustive patterns
+       Un match ne couvre pas tous les cas -> ajoute les cas manquants ou _.
+
+E0063  missing field in initializer
+       Un champ n'est pas initialisé à la construction de la structure.
+
+warning: unused `Result` that must be used
+       Tu ignores une erreur potentielle -> traite-la, ou let _ = ... si
+       c'est vraiment voulu.
+
+Paniques fréquentes à l'exécution :
+   index out of bounds                indice trop grand
+   called `Option::unwrap()` on a `None` value
+   called `Result::unwrap()` on an `Err` value
+   attempt to add with overflow       dépassement (mode debug)
+   attempt to divide by zero
+   byte index N is not a char boundary   découpe d'une &str au milieu d'un
+                                         caractère
+   RefCell already borrowed           double emprunt de RefCell
+
+
+19.4 Tableau de correspondance général C / Rust
+-----------------------------------------------
+   C                                 Rust
+   --------------------------------  --------------------------------------------
+   int, long long, unsigned char     i32, i64, u8
+   size_t, ptrdiff_t, uintptr_t      usize, isize, usize
+   char (octet)                      u8          char (Rust) = Unicode 4 octets
+   _Bool / bool                      bool (pas de conversion depuis un entier)
+   printf("%d\n", x)                 println!("{x}")
+   int x;  (non initialisé)          impossible : initialisation obligatoire
+   const int x = 5;                  let x = 5;   (immuable par défaut)
+   int x = 5; x = 6;                 let mut x = 5; x = 6;
+   #define N 10                      const N: usize = 10;
+   macro avec paramètres             macro_rules!
+   typedef unsigned int uint;        type Uint = u32;
+   static (local à une fonction)     static dans la fonction (ou un atomique)
+   static (privé au fichier)         visibilité privée par défaut du module
+   extern                            pub + use, ou extern "C"
+   #include "fichier.h"              mod fichier;  use ...;
+   #ifdef DEBUG                      #[cfg(debug_assertions)]
+   sizeof(T)  alignof(T)             size_of::<T>()  align_of::<T>()
+   _Static_assert(c, "m")            const _: () = assert!(c, "m");
+   _Generic                          génériques et traits
+   x++                               x += 1
+   c ? a : b                         if c { a } else { b }
+   (int)x                            x as i32   ou   i32::from(x)
+   switch / case / break             match (exhaustif, pas de fall-through)
+   goto (sortir de boucles)          break 'etiquette
+   do { } while (c);                 loop { ...; if !c { break; } }
+   struct                            struct
+   enum (entiers)                    enum simple, #[repr(u8)]
+   union étiquetée à la main         enum avec données
+   NULL                              Option<T>
+   code de retour + errno            Result<T, E>
+   tableau + taille séparée          slice &[T]
+   char * terminé par \0             &str / String (UTF-8, avec longueur)
+   malloc / free                     Box, Vec, String (libération automatique)
+   pointeurs de fonction             fn(A) -> B, closures, traits
+   volatile                          ptr::read_volatile / write_volatile
+   comportement indéfini partout     impossible hors unsafe
+   gcc -Wall -Wextra                 le compilateur + cargo clippy
+   -fsanitize=address,undefined      vérifications à la compilation + Miri
+   gdb                               gdb ou rust-gdb (même outil)
+   make                              cargo
+
+
+19.5 Bonnes pratiques
+---------------------
+   - Lance cargo clippy régulièrement et corrige ce qu'il signale.
+   - Formate avec cargo fmt (tout l'écosystème Rust a le même style).
+   - Lis les messages d'erreur EN ENTIER : la solution y est souvent.
+   - Par défaut, prends des références en paramètres (&str, &[T], &T).
+   - N'abuse pas de clone() pour faire taire le borrow checker : cherche
+     d'abord à comprendre ce qu'il protège.
+   - Préfère Option et Result à unwrap dans le vrai code ; expect("raison")
+     sinon.
+   - Utilise les types pour rendre les erreurs impossibles : newtypes, enums.
+   - Garde unsafe minuscule, commente chaque bloc avec // SAFETY:, et entoure
+     le tout d'une interface sûre.
+   - Écris des tests dès le début : cargo test est gratuit.
+
+
+19.6 Pour aller plus loin
+-------------------------
+   - "The Rust Programming Language", le livre officiel, gratuit en ligne sur
+     doc.rust-lang.org/book. Une traduction française existe sous le titre
+     "Le langage de programmation Rust".
+   - "Rust by Example" : le langage par des exemples courts.
+   - Rustlings : de petits exercices à corriger dans le terminal, excellent
+     pour pratiquer.
+   - La documentation de la bibliothèque standard : doc.rust-lang.org/std
+     (ou cargo doc --open pour ton projet et ses dépendances, hors ligne).
+   - "The Rustonomicon" : tout sur unsafe et les pointeurs bruts.
+   - "The Embedded Rust Book" : Rust sur microcontrôleurs.
+   - "Writing an OS in Rust" (os.phil-opp.com) : un noyau x86-64 pas à pas.
+
+
+================================================================================
+ 20. CORRIGÉS DES EXERCICES
+================================================================================
+
+Essaie vraiment avant de regarder. Si ta solution compile sans avertissement,
+passe cargo clippy sans remarque et donne le bon résultat, elle est bonne.
+
+--- 2.1 ---
+   use std::mem::size_of;
+
+   fn main() {
+       println!("i8   : {} à {} ({} octet)", i8::MIN, i8::MAX, size_of::<i8>());
+       println!("u8   : {} à {} ({} octet)", u8::MIN, u8::MAX, size_of::<u8>());
+       println!("i32  : {} à {} ({} octets)", i32::MIN, i32::MAX, size_of::<i32>());
+       println!("u64  : {} à {} ({} octets)", u64::MIN, u64::MAX, size_of::<u64>());
+       println!("i128 : {} à {} ({} octets)", i128::MIN, i128::MAX, size_of::<i128>());
+   }
+
+--- 2.2 ---
+   let x: u8 = 250;
+   println!("{}", x.wrapping_add(10));      // 4    (260 - 256)
+   println!("{:?}", x.checked_add(10));     // None
+   println!("{}", x.saturating_add(10));    // 255
+
+--- 2.3 ---
+   'A' as u32        -> 65     code Unicode de A
+   97u8 as char      -> 'a'
+   3.99_f64 as i32   -> 3      la partie décimale est coupée, pas d'arrondi
+   -5_i32 as u8      -> 251    on garde les 8 bits du bas : -5 + 256
+
+--- 3.1 ---
+   let bissextile = (annee % 4 == 0 && annee % 100 != 0) || annee % 400 == 0;
+
+--- 3.2 ---
+   let mut reg: u8 = 0b0000_0000;
+   reg |= (1 << 0) | (1 << 3);     // 0b0000_1001
+   reg ^= 1 << 7;                  // 0b1000_1001
+   reg &= !(1 << 0);               // 0b1000_1000
+   println!("{reg:#010b} {reg:#04x}");      // 0b10001000 0x88
+
+--- 3.3 ---
+   -7 / 2                 = -3   la division entière arrondit vers zéro
+   -7 % 2                 = -1   le reste a le signe du dividende
+   (-7_i32).rem_euclid(2) =  1   reste euclidien, toujours positif
+   Les parenthèses comptent : -7_i32.rem_euclid(2) serait -(7.rem_euclid(2)),
+   soit -1, car l'appel de méthode passe avant le moins unaire.
+
+--- 4.1 ---
+   for ligne in 1..=10 {
+       for col in 1..=10 {
+           print!("{:4}", ligne * col);
+       }
+       println!();
+   }
+
+--- 4.2 ---
+   for i in 1..=100 {
+       match (i % 3, i % 5) {
+           (0, 0) => println!("FizzBuzz"),
+           (0, _) => println!("Fizz"),
+           (_, 0) => println!("Buzz"),
+           _ => println!("{i}"),
+       }
+   }
+
+--- 4.3 ---
+   let mut n = 0u32;
+   let resultat = loop {
+       n += 1;
+       if n * n > 5000 {
+           break n;
+       }
+   };
+   println!("{resultat}");       // 71  (70 x 70 = 4900, 71 x 71 = 5041)
+
+--- 5.1 ---
+   fn pgcd(mut a: u64, mut b: u64) -> u64 {
+       while b != 0 {
+           let r = a % b;
+           a = b;
+           b = r;
+       }
+       a
+   }
+
+   fn pgcd_rec(a: u64, b: u64) -> u64 {
+       if b == 0 { a } else { pgcd_rec(b, a % b) }
+   }
+
+   (mut devant un paramètre : la copie locale est modifiable.)
+
+--- 5.2 ---
+   fn est_premier(n: u64) -> bool {
+       if n < 2 {
+           return false;
+       }
+       let mut d = 2;
+       while d <= n / d {               // évite le dépassement de d * d
+           if n % d == 0 {
+               return false;
+           }
+           d += 1;
+       }
+       true
+   }
+
+--- 5.3 ---
+   fn min_max(t: [i32; 5]) -> (i32, i32) {
+       let mut min = t[0];
+       let mut max = t[0];
+       for x in t {
+           if x < min { min = x; }
+           if x > max { max = x; }
+       }
+       (min, max)
+   }
+
+--- 6.1 ---
+   fn afficher(s: String) {
+       println!("{s}");
+   }
+
+   fn afficher_et_rendre(s: String) -> String {
+       println!("{s}");
+       s
+   }
+
+   fn main() {
+       let texte = String::from("salut");
+       afficher(texte.clone());               // correction 1 : une copie
+       let texte = afficher_et_rendre(texte); // correction 2 : on la récupère
+       println!("{texte}");
+   }
+   La vraie bonne solution arrive au chapitre 7 : fn afficher(s: &str).
+
+--- 6.2 ---
+   struct Bruyant(&'static str);
+
+   impl Drop for Bruyant {
+       fn drop(&mut self) {
+           println!("destruction de {}", self.0);
+       }
+   }
+
+   fn main() {
+       let _a = Bruyant("a");
+       {
+           let _b = Bruyant("b");
+           {
+               let _c = Bruyant("c");
+           }
+           println!("fin du bloc de b");
+       }
+       println!("fin de main");
+   }
+   // destruction de c
+   // fin du bloc de b
+   // destruction de b
+   // fin de main
+   // destruction de a
+
+   PIÈGE : let _ = Bruyant("x"); (avec _ seul, sans nom) détruit la valeur
+   IMMÉDIATEMENT, car _ ne lie rien. let _x = ... la garde jusqu'à la fin du
+   bloc. C'est important avec les verrous (Mutex) : let _ = m.lock() relâche
+   le verrou tout de suite.
+
+--- 6.3 ---
+   let b = a;      copie        a reste utilisable (i32 est Copy)
+   let d = c;      copie        tuple de types Copy
+   let f = e;      copie        tableau de types Copy
+   let h = g;      déplacement  g inutilisable (String)
+   let j = i;      déplacement  i inutilisable : le tuple contient une String,
+                                il n'est donc pas Copy
+
+--- 7.1 ---
+   fn min_max(t: &[i32]) -> (i32, i32) {
+       let mut min = t[0];              // panique si la slice est vide
+       let mut max = t[0];
+       for &x in t {                    // &x : déstructure la référence
+           min = min.min(x);
+           max = max.max(x);
+       }
+       (min, max)
+   }
+
+   let tab = [4, -2, 9, 0, 7];
+   min_max(&tab);          // (-2, 9)
+   min_max(&tab[2..]);     // (0, 9)
+
+--- 7.2 ---
+   fn inverser(t: &mut [i32]) {
+       if t.is_empty() {
+           return;
+       }
+       let mut i = 0;
+       let mut j = t.len() - 1;         // sans le test, 0 - 1 déborderait
+       while i < j {
+           t.swap(i, j);
+           i += 1;
+           j -= 1;
+       }
+   }
+
+--- 7.3 ---
+   fn plus_grand<'a>(t: &'a [i32]) -> &'a i32 {
+       let mut max = &t[0];
+       for x in t {
+           if x > max {
+               max = x;
+           }
+       }
+       max
+   }
+   (Ici l'annotation est facultative grâce à la règle d'élision n°2, mais
+   l'écrire aide à comprendre : le résultat vit aussi longtemps que t.)
+
+--- 7.4 ---
+   fn est_palindrome(s: &str) -> bool {
+       s.chars().eq(s.chars().rev())
+   }
+   On compare les caractères et non les octets, pour que "été" fonctionne.
+
+--- 7.5 ---
+   for x in &v emprunte v en lecture pendant TOUTE la boucle. v.push(4)
+   demande un emprunt modifiable pendant ce temps : erreur E0502. Et c'est un
+   vrai bug évité : push peut réallouer le Vec pendant qu'on le parcourt.
+
+   Correction : décider d'abord, modifier ensuite.
+      let mut v = vec![1, 2, 3];
+      let contient_deux = v.contains(&2);
+      if contient_deux {
+          v.push(4);
+      }
+
+--- 7.6 ---
+   struct Tokeniseur<'a> {
+       reste: &'a str,
+   }
+
+   impl<'a> Tokeniseur<'a> {
+       fn new(texte: &'a str) -> Self {
+           Tokeniseur { reste: texte }
+       }
+
+       fn suivant(&mut self) -> Option<&'a str> {
+           let texte = self.reste.trim_start();
+           if texte.is_empty() {
+               self.reste = texte;
+               return None;
+           }
+           match texte.find(' ') {
+               Some(i) => {
+                   self.reste = &texte[i..];
+                   Some(&texte[..i])
+               }
+               None => {
+                   self.reste = "";
+                   Some(texte)
+               }
+           }
+       }
+   }
+
+   let mut t = Tokeniseur::new("un  deux trois");
+   let premier = t.suivant();     // Some("un")
+   let second = t.suivant();      // Some("deux")
+   println!("{premier:?} {second:?}");
+
+   Le type de retour Option<&'a str> est essentiel : les mots empruntent le
+   TEXTE d'origine (durée 'a), pas le Tokeniseur. Avec Option<&str> tout
+   court, l'élision lierait le résultat à &mut self, et on ne pourrait pas
+   garder premier pendant qu'on appelle suivant une deuxième fois.
+
+--- 8.1 ---
+   struct Compte {
+       titulaire: String,
+       solde: i64,
+   }
+
+   impl Compte {
+       fn new(titulaire: &str) -> Self {
+           Compte { titulaire: titulaire.to_string(), solde: 0 }
+       }
+
+       fn deposer(&mut self, montant: i64) {
+           self.solde += montant;
+       }
+
+       fn retirer(&mut self, montant: i64) -> bool {
+           if montant > self.solde {
+               return false;
+           }
+           self.solde -= montant;
+           true
+       }
+
+       fn afficher(&self) {
+           println!("{} : {} €", self.titulaire, self.solde);
+       }
+   }
+
+--- 8.2 ---
+   struct Point {
+       x: f64,
+       y: f64,
+   }
+
+   impl Point {
+       fn distance(&self, autre: &Point) -> f64 {
+           ((self.x - autre.x).powi(2) + (self.y - autre.y).powi(2)).sqrt()
+       }
+   }
+
+--- 8.3 ---
+   struct Celsius(f64);
+   struct Fahrenheit(f64);
+
+   fn en_fahrenheit(c: Celsius) -> Fahrenheit {
+       Fahrenheit(c.0 * 9.0 / 5.0 + 32.0)
+   }
+
+   fn en_celsius(f: Fahrenheit) -> Celsius {
+       Celsius((f.0 - 32.0) * 5.0 / 9.0)
+   }
+
+   en_fahrenheit(Fahrenheit(100.0));   // ERREUR E0308 : mismatched types
+
+--- 9.1 ---
+   enum Forme {
+       Cercle(f64),
+       Rectangle(f64, f64),
+       Triangle(f64, f64, f64),
+   }
+
+   impl Forme {
+       fn aire(&self) -> f64 {
+           match self {
+               Forme::Cercle(r) => std::f64::consts::PI * r * r,
+               Forme::Rectangle(l, h) => l * h,
+               Forme::Triangle(a, b, c) => {
+                   let s = (a + b + c) / 2.0;             // demi-périmètre
+                   (s * (s - a) * (s - b) * (s - c)).sqrt()
+               }
+           }
+       }
+   }
+
+--- 9.2 ---
+   fn premier_pair(t: &[i32]) -> Option<usize> {
+       for (i, x) in t.iter().enumerate() {
+           if x % 2 == 0 {
+               return Some(i);
+           }
+       }
+       None
+   }
+   Version itérateur : t.iter().position(|x| x % 2 == 0)
+
+--- 9.3 ---
+   enum Expr {
+       Nombre(i64),
+       Addition(Box<Expr>, Box<Expr>),
+       Multiplication(Box<Expr>, Box<Expr>),
+   }
+
+   fn evaluer(e: &Expr) -> i64 {
+       match e {
+           Expr::Nombre(n) => *n,
+           Expr::Addition(a, b) => evaluer(a) + evaluer(b),
+           Expr::Multiplication(a, b) => evaluer(a) * evaluer(b),
+       }
+   }
+
+   use Expr::*;
+   // (2 + 3) * 4
+   let e = Multiplication(
+       Box::new(Addition(Box::new(Nombre(2)), Box::new(Nombre(3)))),
+       Box::new(Nombre(4)),
+   );
+   println!("{}", evaluer(&e));      // 20
+
+   evaluer(a) reçoit une &Box<Expr> qui se convertit automatiquement en &Expr
+   (coercition de déréférencement, 14.3).
+
+--- 9.4 ---
+   fn decrire(t: &[i32]) -> String {
+       match t {
+           [] => String::from("vide"),
+           [x] => format!("un élément : {x}"),
+           [premier, .., dernier] => {
+               format!("commence par {premier} et finit par {dernier}")
+           }
+       }
+   }
+
+--- 10.1 ---
+   fn mots_longs(s: &str) -> Vec<&str> {
+       s.split_whitespace()
+           .filter(|mot| mot.chars().count() > 3)
+           .collect()
+   }
+   Les &str du résultat empruntent s : aucune copie de texte.
+
+--- 10.2 ---
+   use std::collections::HashMap;
+
+   fn frequences(texte: &str) {
+       let mut compte: HashMap<char, usize> = HashMap::new();
+       for c in texte.chars() {
+           *compte.entry(c).or_insert(0) += 1;
+       }
+
+       let mut liste: Vec<(char, usize)> = compte.into_iter().collect();
+       liste.sort_by(|a, b| b.1.cmp(&a.1));      // décroissant
+
+       for (c, n) in liste {
+           println!("{c:?} : {n}");
+       }
+   }
+
+--- 10.3 ---
+   fn inverser_mots(s: &str) -> String {
+       s.split_whitespace().rev().collect::<Vec<_>>().join(" ")
+   }
+
+--- 11.1 ---
+   fn moyenne(t: &[f64]) -> Option<f64> {
+       if t.is_empty() {
+           None
+       } else {
+           Some(t.iter().sum::<f64>() / t.len() as f64)
+       }
+   }
+
+--- 11.2 ---
+   fn somme_texte(s: &str) -> Result<i64, std::num::ParseIntError> {
+       let mut total = 0;
+       for morceau in s.split(',') {
+           total += morceau.trim().parse::<i64>()?;
+       }
+       Ok(total)
+   }
+
+   somme_texte("1, 2, 3")      // Ok(6)
+   somme_texte("1, deux")      // Err(ParseIntError { kind: InvalidDigit })
+
+--- 11.3 ---
+   #[derive(Debug)]
+   enum ErreurCompte {
+       SoldeInsuffisant { manque: i64 },
+       MontantNegatif,
+   }
+
+   impl Compte {
+       fn retirer(&mut self, montant: i64) -> Result<(), ErreurCompte> {
+           if montant < 0 {
+               return Err(ErreurCompte::MontantNegatif);
+           }
+           if montant > self.solde {
+               return Err(ErreurCompte::SoldeInsuffisant {
+                   manque: montant - self.solde,
+               });
+           }
+           self.solde -= montant;
+           Ok(())
+       }
+   }
+
+   match compte.retirer(500) {
+       Ok(()) => println!("retrait effectué"),
+       Err(ErreurCompte::SoldeInsuffisant { manque }) => {
+           println!("il manque {manque} €")
+       }
+       Err(e) => println!("erreur : {e:?}"),
+   }
+
+--- 12.1 ---
+   fn plus_petit<T: PartialOrd + Copy>(t: &[T]) -> Option<T> {
+       let mut min = *t.first()?;          // None si vide, grâce à ?
+       for &x in t {
+           if x < min {
+               min = x;
+           }
+       }
+       Some(min)
+   }
+
+--- 12.2 ---
+   trait Animal {
+       fn nom(&self) -> String;
+       fn cri(&self) -> String;
+       fn presenter(&self) -> String {
+           format!("{} fait {}", self.nom(), self.cri())
+       }
+   }
+
+   struct Chien;
+   struct Chat { nom: String }
+
+   impl Animal for Chien {
+       fn nom(&self) -> String { String::from("Le chien") }
+       fn cri(&self) -> String { String::from("wouf") }
+   }
+
+   impl Animal for Chat {
+       fn nom(&self) -> String { self.nom.clone() }
+       fn cri(&self) -> String { String::from("miaou") }
+   }
+
+   let animaux: Vec<Box<dyn Animal>> = vec![
+       Box::new(Chien),
+       Box::new(Chat { nom: String::from("Minou") }),
+   ];
+   for a in &animaux {
+       println!("{}", a.presenter());
+   }
+
+--- 12.3 ---
+   use std::fmt;
+   use std::ops::{Add, Mul, Sub};
+
+   #[derive(Debug, Clone, Copy, PartialEq)]
+   struct Vecteur2 {
+       x: f64,
+       y: f64,
+   }
+
+   impl fmt::Display for Vecteur2 {
+       fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+           write!(f, "({}, {})", self.x, self.y)
+       }
+   }
+
+   impl Add for Vecteur2 {
+       type Output = Vecteur2;
+       fn add(self, o: Vecteur2) -> Vecteur2 {
+           Vecteur2 { x: self.x + o.x, y: self.y + o.y }
+       }
+   }
+
+   impl Sub for Vecteur2 {
+       type Output = Vecteur2;
+       fn sub(self, o: Vecteur2) -> Vecteur2 {
+           Vecteur2 { x: self.x - o.x, y: self.y - o.y }
+       }
+   }
+
+   impl Mul<f64> for Vecteur2 {
+       type Output = Vecteur2;
+       fn mul(self, k: f64) -> Vecteur2 {
+           Vecteur2 { x: self.x * k, y: self.y * k }
+       }
+   }
+
+   let a = Vecteur2 { x: 1.0, y: 2.0 };
+   let b = Vecteur2 { x: 3.0, y: 4.0 };
+   println!("{}", (a + b) * 2.0);          // (8, 12)
+   assert_eq!(b - a, Vecteur2 { x: 2.0, y: 2.0 });
+
+--- 13.1 ---
+   let somme: u32 = (1..1000).filter(|n| n % 3 == 0 || n % 5 == 0).sum();
+   // 233168
+
+--- 13.2 ---
+   fn compter_mots_longs(texte: &str, n: usize) -> usize {
+       texte.split_whitespace().filter(|m| m.chars().count() > n).count()
+   }
+
+--- 13.3 ---
+   struct Compte {
+       courant: u32,
+       fin: u32,
+   }
+
+   impl Compte {
+       fn new(debut: u32, fin: u32) -> Self {
+           Compte { courant: debut, fin }
+       }
+   }
+
+   impl Iterator for Compte {
+       type Item = u32;
+       fn next(&mut self) -> Option<u32> {
+           if self.courant > self.fin {
+               return None;
+           }
+           let valeur = self.courant;
+           self.courant += 1;
+           Some(valeur)
+       }
+   }
+
+   // (1,2) (2,3) (3,4) (4,5) -> 2 + 6 + 12 + 20
+   let total: u32 = Compte::new(1, 4)
+       .zip(Compte::new(2, 5))
+       .map(|(a, b)| a * b)
+       .sum();                          // 40
+
+--- 13.4 ---
+   fn composer<A, B, C>(
+       f: impl Fn(A) -> B,
+       g: impl Fn(B) -> C,
+   ) -> impl Fn(A) -> C {
+       move |x| g(f(x))                 // move : f et g entrent dans la closure
+   }
+
+   let double_puis_texte = composer(|x: i32| x * 2, |y: i32| format!("<{y}>"));
+   println!("{}", double_puis_texte(21));      // <42>
+
+--- 14.1 ---
+   struct Noeud {
+       valeur: i32,
+       suivant: Option<Box<Noeud>>,
+   }
+
+   struct Pile {
+       tete: Option<Box<Noeud>>,
+   }
+
+   impl Pile {
+       fn new() -> Self {
+           Pile { tete: None }
+       }
+
+       fn empiler(&mut self, valeur: i32) {
+           let nouveau = Box::new(Noeud {
+               valeur,
+               suivant: self.tete.take(),   // prend l'ancienne tête, laisse None
+           });
+           self.tete = Some(nouveau);
+       }
+
+       fn depiler(&mut self) -> Option<i32> {
+           self.tete.take().map(|noeud| {
+               self.tete = noeud.suivant;
+               noeud.valeur
+           })
+       }
+
+       fn sommet(&self) -> Option<&i32> {
+           self.tete.as_ref().map(|noeud| &noeud.valeur)
+       }
+   }
+
+   Pourquoi take() ? self.tete est derrière une &mut self : on ne peut pas
+   la déplacer en laissant un trou. take() la sort et met None à la place.
+
+--- 14.2 ---
+   struct Arbre {
+       valeur: i32,
+       gauche: Option<Box<Arbre>>,
+       droite: Option<Box<Arbre>>,
+   }
+
+   impl Arbre {
+       fn new(valeur: i32) -> Self {
+           Arbre { valeur, gauche: None, droite: None }
+       }
+
+       fn inserer(&mut self, v: i32) {
+           let branche = if v < self.valeur {
+               &mut self.gauche
+           } else {
+               &mut self.droite
+           };
+           match branche {
+               Some(enfant) => enfant.inserer(v),
+               None => *branche = Some(Box::new(Arbre::new(v))),
+           }
+       }
+
+       fn contient(&self, v: i32) -> bool {
+           if v == self.valeur {
+               return true;
+           }
+           let branche = if v < self.valeur { &self.gauche } else { &self.droite };
+           match branche {
+               Some(enfant) => enfant.contient(v),
+               None => false,
+           }
+       }
+   }
+
+--- 14.3 ---
+   use std::cell::RefCell;
+   use std::rc::Rc;
+
+   let liste = Rc::new(RefCell::new(Vec::<String>::new()));
+   println!("compteur : {}", Rc::strong_count(&liste));      // 1
+
+   let autre = Rc::clone(&liste);
+   println!("compteur : {}", Rc::strong_count(&liste));      // 2
+
+   liste.borrow_mut().push(String::from("pain"));
+   liste.borrow_mut().push(String::from("lait"));
+   println!("{:?}", autre.borrow());                         // ["pain", "lait"]
+
+   drop(autre);
+   println!("compteur : {}", Rc::strong_count(&liste));      // 1
+
+--- 14.4 ---
+   fn echanger(a: *mut i32, b: *mut i32) {
+       // SAFETY: l'appelant fournit deux pointeurs valides, alignés et
+       // initialisés (ils viennent de références &mut, voir l'appel).
+       unsafe {
+           let tmp = *a;
+           *a = *b;
+           *b = tmp;
+       }
+   }
+
+   let mut x = 1;
+   let mut y = 2;
+   echanger(&raw mut x, &raw mut y);
+
+   Remarque : cette fonction n'est pas marquée unsafe, alors qu'un appelant
+   pourrait lui passer un pointeur nul et provoquer un comportement indéfini
+   sans écrire unsafe. C'est une MAUVAISE interface. La bonne version est soit
+   unsafe fn echanger(...) avec une section "# Safety" dans la documentation,
+   soit, bien mieux, la version avec &mut i32 du 7.2.
+
+--- 14.5 ---
+   let t: [u32; 5] = [10, 20, 30, 40, 50];
+
+   let p = t.as_ptr();
+   for i in 0..t.len() {
+       // SAFETY: i < t.len(), donc p.add(i) reste dans le tableau
+       unsafe {
+           println!("{}", *p.add(i));
+       }
+   }
+
+   for x in &t {                // version sûre : même code machine en release,
+       println!("{x}");         // sans aucun risque
+   }
+
+--- 14.6 ---
+   use std::cell::RefCell;
+   let c = RefCell::new(5);
+   let a = c.borrow_mut();
+   let b = c.borrow_mut();      // panique : RefCell already borrowed
+   Le compilateur accepte ce code : la vérification a lieu à l'exécution.
+
+--- 15.1 ---
+   src/compte.rs :
+      pub struct Compte {
+          solde: i64,               // privé
+      }
+
+      impl Compte {
+          pub fn new() -> Self { Compte { solde: 0 } }
+          pub fn deposer(&mut self, montant: i64) { self.solde += montant; }
+          pub fn solde(&self) -> i64 { self.solde }
+      }
+
+   src/main.rs :
+      mod compte;
+      use compte::Compte;
+
+      fn main() {
+          let mut c = Compte::new();
+          c.deposer(100);
+          println!("{}", c.solde());
+          // c.solde = 1_000_000;           // ERREUR E0616 : field is private
+          // Compte { solde: 5 };           // ERREUR : champ privé
+      }
+
+--- 15.2 ---
+   #[cfg(test)]
+   mod tests {
+       use super::*;
+
+       #[test]
+       fn zero_et_un_ne_sont_pas_premiers() {
+           assert!(!est_premier(0));
+           assert!(!est_premier(1));
+       }
+
+       #[test]
+       fn petits_premiers() {
+           for p in [2, 3, 5, 7, 11, 13] {
+               assert!(est_premier(p), "{p} devrait être premier");
+           }
+       }
+
+       #[test]
+       fn nombres_composes() {
+           for n in [4, 6, 9, 15, 91] {
+               assert!(!est_premier(n), "{n} ne devrait pas être premier");
+           }
+       }
+   }
+
+--- 17.1 ---
+   use std::thread;
+
+   let nombres: Vec<u64> = (1..=1_000_000).collect();
+   let taille = nombres.len().div_ceil(4);
+
+   let total: u64 = thread::scope(|s| {
+       let poignees: Vec<_> = nombres
+           .chunks(taille)
+           .map(|morceau| s.spawn(move || morceau.iter().sum::<u64>()))
+           .collect();                 // collect lance tous les threads
+       poignees.into_iter().map(|p| p.join().unwrap()).sum()
+   });
+   println!("{total}");               // 500000500000
+
+   Le collect intermédiaire est indispensable : les itérateurs sont paresseux.
+   Sans lui, chaque thread serait lancé puis attendu avant de lancer le
+   suivant, et il n'y aurait aucun parallélisme.
+
+--- 17.2 ---
+   use std::sync::mpsc;
+   use std::thread;
+
+   let (tx, rx) = mpsc::channel();
+   for i in 1..=5u32 {
+       let tx = tx.clone();
+       thread::spawn(move || tx.send(i * i).unwrap());
+   }
+   drop(tx);
+   let somme: u32 = rx.iter().sum();
+   println!("{somme}");                // 55
+
+--- 18.1 ---
+   fn afficher_nombre(mut n: u32) {
+       let mut tampon = [0u8; 10];      // u32 max = 4294967295 : 10 chiffres
+       let mut i = tampon.len();
+       loop {
+           i -= 1;
+           tampon[i] = b'0' + (n % 10) as u8;   // chiffres de droite à gauche
+           n /= 10;
+           if n == 0 {
+               break;
+           }
+       }
+       let chiffres = &tampon[i..];
+       // SAFETY: pointeur et longueur issus d'une slice valide
+       unsafe {
+           sys_write(1, chiffres.as_ptr(), chiffres.len());
+       }
+   }
+
+
+================================================================================
+                               FIN DU COURS
+     Prochaine étape : fais les exercices de Rustlings, puis construis un vrai
+     projet (un outil en ligne de commande, un interpréteur, un petit jeu, ou
+     un noyau minimal en no_std). C'est en écrivant du vrai code que la
+     possession et les emprunts deviennent une seconde nature.
+================================================================================

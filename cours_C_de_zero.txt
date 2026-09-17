@@ -1,0 +1,3110 @@
+================================================================================
+                    APPRENDRE LE LANGAGE C DE ZÉRO
+               Le langage pur : mots-clés, opérateurs, préprocesseur
+                        et un gros chapitre sur les pointeurs
+================================================================================
+
+SOMMAIRE
+
+   0. Avant de commencer : c'est quoi le C, comment on compile
+   1. Le premier programme
+   2. Variables et types de base
+   3. Les opérateurs
+   4. Le contrôle du flux (conditions et boucles)
+   5. Les fonctions
+   6. Les tableaux
+   7. Les chaînes de caractères
+   8. LES POINTEURS (le chapitre le plus important)
+   9. Structures, unions, énumérations et typedef
+  10. Qualificateurs, classes de stockage et programmes en plusieurs fichiers
+  11. Le préprocesseur
+  12. Ce qui se passe à la compilation (sizeof, _Generic, static_assert...)
+  13. Les nouveautés de C23
+  14. Le comportement indéfini : les pièges mortels du C
+  15. Le C sans bibliothèque (freestanding)
+  16. Annexes : priorité des opérateurs, récap des mots-clés, erreurs fréquentes
+  17. Corrigés des exercices
+
+Comment utiliser ce cours : lis un chapitre, tape les exemples toi-même (ne
+copie-colle pas), compile-les, modifie-les pour voir ce qui se passe, puis fais
+les exercices. Le C s'apprend en cassant des choses.
+
+
+================================================================================
+ 0. AVANT DE COMMENCER
+================================================================================
+
+0.1 C'est quoi le C ?
+---------------------
+Le C est un langage créé en 1972 par Dennis Ritchie pour écrire Unix. C'est un
+langage "bas niveau" parmi les langages de haut niveau : il te donne un accès
+direct à la mémoire (via les pointeurs) tout en restant lisible. Le noyau Linux,
+la plupart des systèmes d'exploitation, des pilotes, des bases de données et des
+interpréteurs (Python, par exemple) sont écrits en C.
+
+Le C est volontairement petit : environ 50 mots-clés en tout. Tout le reste
+(afficher du texte, lire un fichier, allouer de la mémoire) passe par des
+FONCTIONS de bibliothèque, qui sont elles-mêmes écrites en C.
+
+Les versions du langage (on dit "normes") : C89/C90, C99, C11, C17, C23.
+Ce cours couvre jusqu'à C23 et indique quand une chose est récente.
+
+
+0.2 Comment un programme C devient exécutable
+---------------------------------------------
+Le processeur ne comprend pas le C. Il faut le traduire en code machine. Cette
+traduction se fait en 4 étapes, toutes lancées par la commande gcc :
+
+   programme.c
+       |
+       |  1. PRÉPROCESSEUR : traite les lignes qui commencent par #
+       |     (#include, #define...). Produit du C "pur".
+       v
+   programme.i
+       |
+       |  2. COMPILATION : traduit le C en assembleur.
+       v
+   programme.s
+       |
+       |  3. ASSEMBLAGE : traduit l'assembleur en code machine (fichier objet).
+       v
+   programme.o
+       |
+       |  4. ÉDITION DE LIENS (linker) : assemble tous les .o et les
+       |     bibliothèques en un seul exécutable.
+       v
+   programme   (l'exécutable)
+
+Tu peux voir chaque étape :
+   gcc -E programme.c -o programme.i    (arrêt après le préprocesseur)
+   gcc -S programme.c -o programme.s    (arrêt après la compilation, assembleur)
+   gcc -c programme.c -o programme.o    (arrêt après l'assemblage)
+   gcc programme.o -o programme         (édition de liens)
+
+Astuce : "gcc -S -O1 -masm=intel" donne un assembleur au format Intel, bien
+plus lisible si tu connais NASM. C'est une excellente façon de comprendre ce
+que le C fait vraiment.
+
+
+0.3 Installer le compilateur sous Arch Linux
+--------------------------------------------
+   sudo pacman -S base-devel     (contient gcc, make, etc.)
+   sudo pacman -S gdb            (le débogueur, très utile)
+
+Vérifier : gcc --version
+
+Tu peux aussi installer clang (sudo pacman -S clang), qui donne souvent des
+messages d'erreur plus clairs.
+
+
+0.4 La commande de compilation à utiliser pendant tout le cours
+---------------------------------------------------------------
+   gcc -std=c23 -Wall -Wextra -pedantic -g programme.c -o programme
+   ./programme
+
+   -std=c23     : utilise la norme C23 (sur un vieux gcc : -std=c2x)
+   -Wall        : active les avertissements courants
+   -Wextra      : active encore plus d'avertissements
+   -pedantic    : signale ce qui n'est pas du C standard
+   -g           : ajoute les infos de débogage (pour gdb)
+
+Pour détecter les erreurs de mémoire pendant l'apprentissage (TRÈS utile pour
+le chapitre sur les pointeurs) :
+   gcc -std=c23 -Wall -Wextra -g -fsanitize=address,undefined prog.c -o prog
+
+Règle d'or : un avertissement (warning) du compilateur est presque toujours un
+vrai bug. Ne les ignore jamais.
+
+
+0.5 Une remarque honnête sur "sans bibliothèque"
+------------------------------------------------
+Le langage C seul ne sait RIEN afficher. Il n'y a pas de mot-clé "print".
+Pour voir les résultats de nos exemples, on utilisera UNE seule fonction de la
+bibliothèque standard : printf, déclarée dans <stdio.h>. Tout le reste du cours
+porte sur le langage pur. Le chapitre 15 montre comment faire du C sans aucune
+bibliothèque.
+
+Mini-guide de printf (juste ce qu'il faut) :
+
+   printf("Bonjour\n");              affiche un texte, \n = retour à la ligne
+   printf("%d\n", 42);               %d   : int (entier signé)
+   printf("%u\n", 42u);              %u   : unsigned int
+   printf("%ld\n", 42L);             %ld  : long
+   printf("%lld\n", 42LL);           %lld : long long
+   printf("%f\n", 3.14);             %f   : double (et float)
+   printf("%.2f\n", 3.14159);        %.2f : 2 chiffres après la virgule
+   printf("%c\n", 'A');              %c   : un caractère
+   printf("%s\n", "texte");          %s   : une chaîne de caractères
+   printf("%x\n", 255);              %x   : hexadécimal (affiche ff)
+   printf("%p\n", (void *)&x);       %p   : une adresse mémoire (pointeur)
+   printf("%zu\n", sizeof(int));     %zu  : size_t (résultat de sizeof)
+   printf("%%\n");                   %%   : affiche le caractère %
+
+Plusieurs valeurs : printf("x = %d, y = %d\n", x, y);
+
+
+================================================================================
+ 1. LE PREMIER PROGRAMME
+================================================================================
+
+Crée un fichier bonjour.c :
+
+   #include <stdio.h>        // insère les déclarations de printf
+
+   int main(void)            // la fonction principale, point de départ
+   {                         // début du bloc de la fonction
+       printf("Bonjour !\n");
+       return 0;             // 0 = "tout s'est bien passé"
+   }                         // fin du bloc
+
+Compile et lance :
+   gcc -std=c23 -Wall -Wextra bonjour.c -o bonjour
+   ./bonjour
+
+Ce qu'il faut retenir :
+
+- Tout programme C commence par la fonction main. Deux formes sont standard :
+     int main(void)                        (sans arguments)
+     int main(int argc, char *argv[])      (avec les arguments de la ligne
+                                            de commande, voir chapitre 8)
+
+- Chaque instruction se termine par un point-virgule ;
+
+- Les accolades { } délimitent un BLOC d'instructions.
+
+- La valeur renvoyée par main est le "code de sortie" du programme. Dans le
+  terminal, "echo $?" juste après l'exécution affiche cette valeur. Si main
+  se termine sans return, c'est comme si elle faisait return 0.
+
+- Les commentaires sont ignorés par le compilateur :
+     // commentaire sur une ligne (depuis C99)
+     /* commentaire
+        sur plusieurs lignes */
+  Attention : on ne peut pas imbriquer /* /* */ */.
+
+- Le C est sensible à la casse : main, Main et MAIN sont trois noms différents.
+
+- Les espaces et retours à la ligne sont libres. Indente proprement quand même.
+
+
+================================================================================
+ 2. VARIABLES ET TYPES DE BASE
+================================================================================
+
+2.1 C'est quoi une variable ?
+-----------------------------
+Une variable est une zone de la mémoire, avec un NOM, un TYPE et une VALEUR.
+Le type dit au compilateur combien d'octets réserver et comment interpréter
+ces octets.
+
+   int age;          // DÉCLARATION : réserve la place (valeur indéterminée !)
+   age = 25;         // AFFECTATION : range 25 dans la variable
+   int annee = 2026; // déclaration + INITIALISATION en une fois
+   int a = 1, b = 2; // plusieurs variables d'un coup
+
+ATTENTION : une variable locale non initialisée contient n'importe quoi (ce qui
+traînait dans la mémoire). La lire est un bug. Initialise toujours.
+
+Règles pour les noms : lettres, chiffres et _, ne commence pas par un chiffre,
+pas de mot-clé. Évite les noms commençant par _ suivi d'une majuscule ou par
+deux _ : ils sont réservés au compilateur.
+
+
+2.2 Les types entiers
+---------------------
+   Type          Taille habituelle   Plage habituelle
+   ----------    -----------------   ------------------------------------------
+   char          1 octet             -128 à 127 ou 0 à 255 (dépend du système)
+   signed char   1 octet             -128 à 127
+   unsigned char 1 octet             0 à 255
+   short         2 octets            -32 768 à 32 767
+   int           4 octets            -2 147 483 648 à 2 147 483 647
+   long          8 octets (Linux)    très grand
+                 4 octets (Windows)
+   long long     8 octets            -9,2 x 10^18 à 9,2 x 10^18
+
+La norme ne fixe que des MINIMUMS : char = 8 bits au moins, short et int = 16
+bits au moins, long = 32 bits au moins, long long = 64 bits au moins. C'est pour
+ça qu'il faut utiliser sizeof pour connaître la vraie taille :
+
+   printf("%zu\n", sizeof(int));    // affiche 4 sur un PC
+
+signed et unsigned :
+   - signed (par défaut pour short, int, long) : valeurs négatives possibles.
+   - unsigned : uniquement 0 et positif, mais la plage positive est doublée.
+     unsigned int va de 0 à 4 294 967 295.
+   - Pour char, le fait d'être signé ou non dépend du système. Si tu stockes
+     des octets bruts, utilise unsigned char.
+
+   unsigned int n = 10;
+   unsigned x = 10;          // "unsigned" seul = unsigned int
+   long long grand = 5000000000LL;
+
+Pour avoir des tailles EXACTES (indispensable en bas niveau), <stdint.h>
+fournit : int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, int64_t,
+uint64_t. Cet en-tête ne contient que des définitions de types, pas de code.
+
+
+2.3 Les types à virgule flottante
+---------------------------------
+   float         4 octets   ~6-7 chiffres significatifs
+   double        8 octets   ~15-16 chiffres significatifs  (le plus utilisé)
+   long double   8 à 16 octets, précision étendue
+
+   double pi = 3.14159;
+   float f = 2.5f;           // le suffixe f indique un float
+
+ATTENTION : les flottants sont des approximations en binaire.
+   0.1 + 0.2 == 0.3   est FAUX en C (comme dans presque tous les langages).
+Ne compare jamais deux flottants avec ==. Pour de l'argent, utilise des entiers
+(des centimes) ou les types décimaux de C23 (_Decimal64) si ton compilateur
+les supporte.
+
+Nombres complexes : double _Complex z;  (rarement utile hors calcul scientifique)
+
+
+2.4 Le type booléen
+-------------------
+   bool ok = true;           // C23 : bool, true, false sont des mots-clés
+   _Bool ok2 = 1;            // avant C23 : _Bool, ou bool via <stdbool.h>
+
+Un bool ne vaut que 0 ou 1. Toute valeur non nulle convertie en bool donne 1.
+
+IMPORTANT : en C, dans une condition, 0 veut dire FAUX et tout le reste veut
+dire VRAI. if (5) est vrai, if (0) est faux, if (-1) est vrai.
+
+
+2.5 Le type void
+----------------
+void veut dire "rien". On l'utilise :
+   - pour une fonction qui ne renvoie rien :   void afficher(int x);
+   - pour une fonction sans paramètre :        int lire(void);
+   - pour un pointeur générique :              void *p;   (chapitre 8)
+On ne peut pas déclarer une variable de type void.
+
+
+2.6 Écrire des valeurs (littéraux)
+----------------------------------
+Entiers :
+   42           décimal
+   052          octal (commence par 0 !) = 42. Piège : 010 vaut 8, pas 10.
+   0x2A         hexadécimal = 42
+   0b101010     binaire = 42 (C23)
+   1'000'000    séparateur de chiffres ' (C23), purement visuel
+
+Suffixes :
+   42u   unsigned       42L   long       42LL  long long      42UL  unsigned long
+
+Flottants :
+   3.14    (double)    3.14f  (float)    3.14L  (long double)    1.5e3  (= 1500.0)
+
+Caractères (entre apostrophes simples) :
+   'A'    vaut 65 (code ASCII). Un caractère est juste un petit entier !
+   '\n'   retour à la ligne         '\t'   tabulation
+   '\0'   caractère nul (valeur 0)  '\\'   antislash
+   '\''   apostrophe                '\"'   guillemet
+   '\x41' caractère de code hexa 41 = 'A'
+
+Chaînes (entre guillemets doubles) : "Bonjour"  (chapitre 7)
+
+
+2.7 La portée d'une variable
+----------------------------
+Une variable n'existe que dans le bloc { } où elle est déclarée.
+
+   int main(void)
+   {
+       int x = 1;
+       {
+           int y = 2;        // y n'existe que dans ce bloc
+           int x = 3;        // CE x cache l'autre x (à éviter, source de bugs)
+       }
+       // ici y n'existe plus, et x vaut 1
+       return 0;
+   }
+
+Une variable déclarée hors de toute fonction est GLOBALE : visible dans tout le
+fichier à partir de sa déclaration, et elle vit pendant toute l'exécution.
+Une variable globale non initialisée vaut 0 (contrairement à une locale).
+
+
+2.8 Les conversions de type
+---------------------------
+Conversions implicites (automatiques) :
+   int i = 3.9;          // i vaut 3 : la partie décimale est COUPÉE
+   double d = 5;         // d vaut 5.0
+   char c = 300;         // débordement, le résultat dépend du système
+
+Dans un calcul mêlant des types, le plus "petit" est converti vers le plus
+"grand" : int + double donne un double.
+
+Conversion explicite (cast) :
+   int a = 7, b = 2;
+   double r1 = a / b;            // 3.0 : la division ENTIÈRE est faite d'abord
+   double r2 = (double)a / b;    // 3.5 : a est converti avant la division
+
+PIÈGE CLASSIQUE du mélange signé / non signé :
+   int n = -1;
+   unsigned int u = 1;
+   if (n < u)  ...     // FAUX ! n est converti en unsigned et devient énorme
+Active -Wextra : le compilateur t'avertira.
+
+
+EXERCICES DU CHAPITRE 2
+-----------------------
+2.1  Affiche la taille (sizeof) de char, short, int, long, long long, float,
+     double et long double sur ta machine.
+2.2  Déclare un unsigned char valant 255, ajoute-lui 1 et affiche le résultat
+     avec %d. Explique.
+2.3  Que valent 7 / 2, 7.0 / 2, (double)(7 / 2) et 7 / 2.0 ? Vérifie.
+
+
+================================================================================
+ 3. LES OPÉRATEURS
+================================================================================
+
+3.1 Opérateurs arithmétiques
+----------------------------
+   a + b    addition
+   a - b    soustraction
+   a * b    multiplication
+   a / b    division : ENTIÈRE si a et b sont entiers (7 / 2 = 3)
+            La division entière arrondit vers zéro : -7 / 2 = -3
+   a % b    reste de la division entière (modulo) : 7 % 2 = 1
+            Uniquement pour les entiers. Le signe suit a : -7 % 2 = -1
+   -a       opposé
+   +a       plus unaire (ne fait presque rien)
+
+Diviser un entier par 0 est un comportement indéfini (souvent un plantage).
+
+Usages typiques de % :
+   if (n % 2 == 0)     // n est pair
+   chiffre = n % 10;   // dernier chiffre de n
+
+
+3.2 Incrément et décrément
+--------------------------
+   ++a    ajoute 1 à a, PUIS donne la nouvelle valeur    (préfixe)
+   a++    donne la valeur actuelle, PUIS ajoute 1        (suffixe)
+   --a    et a--  : pareil avec -1
+
+   int a = 5;
+   int b = a++;    // b = 5, a = 6
+   int c = ++a;    // a = 7, c = 7
+
+DANGER : ne modifie jamais la même variable deux fois dans une expression.
+   i = i++;          // comportement indéfini
+   x = i++ + i++;    // comportement indéfini
+Utilise ++ et -- seuls sur leur ligne ou dans un for, et tout ira bien.
+
+
+3.3 Opérateurs de comparaison
+-----------------------------
+Ils renvoient 1 (vrai) ou 0 (faux), de type int.
+   a == b   égal              a != b   différent
+   a <  b   inférieur         a >  b   supérieur
+   a <= b   inférieur ou égal a >= b   supérieur ou égal
+
+PIÈGE N°1 DU DÉBUTANT :
+   if (x = 5)    // AFFECTE 5 à x, et 5 est vrai : toujours exécuté !
+   if (x == 5)   // compare x à 5 : c'est ce que tu voulais
+-Wall t'avertit de ce piège.
+
+Autre piège : 0 < x < 10 ne fait pas ce que tu crois. Il calcule (0 < x), qui
+vaut 0 ou 1, puis compare ce résultat à 10 : c'est toujours vrai.
+Écris : 0 < x && x < 10
+
+
+3.4 Opérateurs logiques
+-----------------------
+   a && b   ET : vrai si a ET b sont vrais
+   a || b   OU : vrai si a OU b (ou les deux) est vrai
+   !a       NON : vrai si a est faux
+
+Évaluation en COURT-CIRCUIT : l'évaluation s'arrête dès que le résultat est
+connu.
+   - Dans a && b, si a est faux, b n'est PAS évalué.
+   - Dans a || b, si a est vrai, b n'est PAS évalué.
+C'est très utile pour se protéger :
+   if (p != nullptr && p->valeur > 0)   // p->valeur n'est lu que si p est valide
+                                        // (pointeurs : chapitre 8)
+   if (b != 0 && a / b > 2)             // pas de division par zéro
+
+
+3.5 Opérateurs bit à bit
+------------------------
+Ils travaillent sur chaque bit des entiers. Indispensables en bas niveau
+(registres matériels, drapeaux, protocoles).
+
+   a & b    ET bit à bit     : bit à 1 si les deux bits sont à 1
+   a | b    OU bit à bit     : bit à 1 si au moins un bit est à 1
+   a ^ b    OU exclusif      : bit à 1 si les bits sont différents
+   ~a       NON bit à bit    : inverse tous les bits
+   a << n   décalage à gauche de n bits (= multiplier par 2^n)
+   a >> n   décalage à droite de n bits (= diviser par 2^n pour un positif)
+
+Exemple sur 8 bits :
+       a = 0b11001010
+       b = 0b10101100
+   a & b = 0b10001000
+   a | b = 0b11101110
+   a ^ b = 0b01100110
+      ~a = 0b00110101
+   a << 1= 0b10010100   (le bit de gauche sort)
+   a >> 2= 0b00110010   (pour un unsigned, des 0 entrent à gauche)
+
+Les 4 manipulations à connaître par cœur :
+   x |=  (1u << n);     // mettre le bit n à 1
+   x &= ~(1u << n);     // mettre le bit n à 0
+   x ^=  (1u << n);     // inverser le bit n
+   (x >> n) & 1u        // lire le bit n (donne 0 ou 1)
+
+Masques : récupérer l'octet de poids faible : x & 0xFF
+          récupérer le 2e octet :             (x >> 8) & 0xFF
+
+Précautions : utilise des types unsigned pour les opérations sur les bits.
+Décaler un nombre négatif vers la gauche, ou décaler d'autant de bits (ou plus)
+que la taille du type, est un comportement indéfini. Décaler un négatif vers la
+droite dépend du compilateur.
+
+Ne confonds pas & (bit à bit) et && (logique) : 1 & 2 vaut 0, 1 && 2 vaut 1.
+
+
+3.6 Opérateurs d'affectation
+----------------------------
+   a = b     range b dans a
+   a += b    équivaut à a = a + b
+   a -= b    a = a - b
+   a *= b    a = a * b
+   a /= b    a = a / b
+   a %= b    a = a % b
+   a &= b    a = a & b
+   a |= b    a = a | b
+   a ^= b    a = a ^ b
+   a <<= n   a = a << n
+   a >>= n   a = a >> n
+
+Une affectation est aussi une expression qui a une valeur : a = b = 0; met 0
+dans b puis dans a (l'affectation se lit de droite à gauche).
+
+
+3.7 Les autres opérateurs
+-------------------------
+   cond ? v1 : v2    TERNAIRE : vaut v1 si cond est vraie, sinon v2
+                     int max = (a > b) ? a : b;
+
+   (type)expr        CAST : conversion explicite    (double)x
+
+   a, b              VIRGULE : évalue a, jette le résultat, puis vaut b.
+                     Surtout utilisé dans les for : for (i = 0, j = 9; ...)
+                     (la virgule qui sépare des arguments de fonction n'est
+                      PAS cet opérateur)
+
+   sizeof            taille en octets   (chapitre 12)
+   &x                adresse de x       (chapitre 8)
+   *p                valeur pointée     (chapitre 8)
+   t[i]              élément d'un tableau (chapitres 6 et 8)
+   s.champ           membre d'une structure (chapitre 9)
+   p->champ          membre via un pointeur (chapitres 8 et 9)
+   f(x)              appel de fonction  (chapitre 5)
+
+
+3.8 Priorité des opérateurs
+---------------------------
+Comme en maths, * passe avant +. Le tableau complet est en annexe (16.1).
+Règle pratique : dès que tu hésites, METS DES PARENTHÈSES. Surtout avec les
+opérateurs bit à bit, qui ont une priorité plus faible que ==.
+   if (x & 1 == 0)     // lu comme x & (1 == 0), donc x & 0 : toujours faux !
+   if ((x & 1) == 0)   // correct
+
+
+EXERCICES DU CHAPITRE 3
+-----------------------
+3.1  Écris une expression qui dit si une année est bissextile (divisible par 4
+     mais pas par 100, sauf si elle est divisible par 400).
+3.2  Soit uint8_t reg = 0b00000000. Mets à 1 les bits 0 et 3, puis inverse le
+     bit 7, puis mets le bit 0 à 0. Affiche le résultat en hexa.
+3.3  Sans utiliser de variable temporaire, échange deux entiers a et b avec
+     l'opérateur ^. (Curiosité à connaître, pas à utiliser en vrai.)
+
+
+================================================================================
+ 4. LE CONTRÔLE DU FLUX
+================================================================================
+
+4.1 if / else
+-------------
+   if (condition) {
+       // exécuté si la condition est vraie (non nulle)
+   }
+
+   if (note >= 10) {
+       printf("Reçu\n");
+   } else {
+       printf("Refusé\n");
+   }
+
+   if (note >= 16) {
+       printf("Très bien\n");
+   } else if (note >= 14) {
+       printf("Bien\n");
+   } else if (note >= 10) {
+       printf("Passable\n");
+   } else {
+       printf("Insuffisant\n");
+   }
+
+Sans accolades, le if ne concerne qu'UNE seule instruction :
+   if (x > 0)
+       printf("positif\n");
+       printf("fin\n");        // TOUJOURS exécuté, malgré l'indentation !
+Conseil : mets toujours des accolades.
+
+
+4.2 switch / case / default
+---------------------------
+Choisit un chemin selon la valeur d'une expression ENTIÈRE (ou char, ou enum).
+
+   switch (choix) {
+   case 1:
+       printf("Nouvelle partie\n");
+       break;                   // sort du switch
+   case 2:
+       printf("Charger\n");
+       break;
+   case 3:
+   case 4:                      // plusieurs valeurs pour le même code
+       printf("Options\n");
+       break;
+   default:                     // aucune valeur ne correspond
+       printf("Choix invalide\n");
+       break;
+   }
+
+ATTENTION : sans break, l'exécution CONTINUE dans le case suivant (on appelle
+ça le "fall-through"). C'est parfois voulu, souvent un oubli. Quand c'est voulu,
+signale-le en C23 :
+   case 1:
+       faire_a();
+       [[fallthrough]];
+   case 2:
+       faire_b();
+       break;
+
+Les valeurs des case doivent être des constantes connues à la compilation.
+On ne peut pas faire de switch sur une chaîne de caractères ou un double.
+
+
+4.3 while
+---------
+Répète tant que la condition est vraie. La condition est testée AVANT chaque
+tour : si elle est fausse dès le départ, la boucle ne s'exécute jamais.
+
+   int i = 0;
+   while (i < 5) {
+       printf("%d\n", i);
+       i++;
+   }                           // affiche 0 1 2 3 4
+
+Boucle infinie (courante en programmation système) : while (1) { ... }
+
+
+4.4 do ... while
+----------------
+La condition est testée APRÈS chaque tour : la boucle s'exécute au moins une
+fois. Note le point-virgule final.
+
+   int n = 0;
+   do {
+       printf("tour %d\n", n);
+       n++;
+   } while (n < 3);
+
+
+4.5 for
+-------
+La boucle la plus utilisée quand on connaît le nombre de tours.
+
+   for (initialisation; condition; mise_à_jour) {
+       corps
+   }
+
+   for (int i = 0; i < 5; i++) {
+       printf("%d\n", i);
+   }
+
+Équivaut exactement à :
+   {
+       int i = 0;
+       while (i < 5) {
+           printf("%d\n", i);
+           i++;
+       }
+   }
+
+Chaque partie est facultative : for (;;) { } est une boucle infinie.
+Déclarer la variable dans le for (int i = 0...) limite sa portée à la boucle
+(depuis C99). C'est la bonne pratique.
+
+Compter à rebours avec un unsigned : PIÈGE
+   for (unsigned i = 9; i >= 0; i--)    // BOUCLE INFINIE : un unsigned est
+                                        // toujours >= 0
+   for (int i = 9; i >= 0; i--)         // correct
+
+
+4.6 break et continue
+---------------------
+   break    : sort immédiatement de la boucle (ou du switch) la plus proche.
+   continue : saute la fin du tour et passe au tour suivant.
+
+   for (int i = 0; i < 10; i++) {
+       if (i == 7) break;         // arrête tout à 7
+       if (i % 2 == 0) continue;  // saute les nombres pairs
+       printf("%d\n", i);         // affiche 1 3 5
+   }
+
+break ne sort que d'UN niveau de boucle.
+
+
+4.7 goto
+--------
+Saute vers une étiquette (un nom suivi de :) dans la même fonction.
+
+   for (int i = 0; i < 10; i++) {
+       for (int j = 0; j < 10; j++) {
+           if (i * j == 42) goto trouve;
+       }
+   }
+   printf("pas trouvé\n");
+   return 1;
+   trouve:
+   printf("trouvé\n");
+
+goto a mauvaise réputation parce qu'il rend le code illisible quand on en abuse.
+Deux usages sont acceptés et courants (notamment dans le noyau Linux) :
+   - sortir de plusieurs boucles imbriquées d'un coup ;
+   - centraliser le nettoyage en cas d'erreur à la fin d'une fonction.
+
+
+4.8 return
+----------
+Quitte la fonction immédiatement, en renvoyant une valeur si la fonction en
+renvoie une. Voir chapitre 5.
+
+
+EXERCICES DU CHAPITRE 4
+-----------------------
+4.1  Affiche la table de multiplication de 1 à 10 sous forme de grille.
+4.2  Affiche les nombres de 1 à 100, mais "Fizz" pour les multiples de 3,
+     "Buzz" pour les multiples de 5 et "FizzBuzz" pour les multiples des deux.
+4.3  Calcule et affiche la somme des chiffres de 987654 (utilise % et /).
+
+
+================================================================================
+ 5. LES FONCTIONS
+================================================================================
+
+5.1 Définir et appeler une fonction
+-----------------------------------
+Une fonction est un bloc de code nommé, réutilisable.
+
+   type_de_retour nom(paramètres)
+   {
+       corps
+   }
+
+   int carre(int n)          // prend un int, renvoie un int
+   {
+       return n * n;
+   }
+
+   void saluer(void)         // ne prend rien, ne renvoie rien
+   {
+       printf("Salut\n");
+   }
+
+   int main(void)
+   {
+       int r = carre(7);     // APPEL : r vaut 49
+       saluer();
+       return 0;
+   }
+
+
+5.2 Déclaration (prototype) et définition
+-----------------------------------------
+Le compilateur lit le fichier de haut en bas. Pour appeler une fonction définie
+plus bas, il faut la DÉCLARER avant, avec un PROTOTYPE :
+
+   int carre(int n);         // prototype : juste la signature et un ;
+
+   int main(void)
+   {
+       return carre(3);
+   }
+
+   int carre(int n)          // définition : le vrai code
+   {
+       return n * n;
+   }
+
+Les prototypes vont en général dans un fichier .h (chapitre 10).
+
+
+5.3 Passage des paramètres PAR VALEUR
+-------------------------------------
+TRÈS IMPORTANT : en C, une fonction reçoit une COPIE de ses arguments.
+Modifier le paramètre ne modifie pas la variable de l'appelant.
+
+   void mettre_a_zero(int x)
+   {
+       x = 0;                // modifie la copie seulement
+   }
+
+   int main(void)
+   {
+       int a = 5;
+       mettre_a_zero(a);
+       printf("%d\n", a);    // affiche 5, pas 0 !
+   }
+
+Pour qu'une fonction modifie une variable de l'appelant, il faut lui passer
+l'ADRESSE de la variable : c'est le rôle des pointeurs (chapitre 8).
+
+
+5.4 void et les paramètres
+--------------------------
+   int f(void);   // f ne prend AUCUN paramètre
+   int g();       // avant C23 : "paramètres non précisés" (vieux style, piège)
+                  // en C23 : identique à g(void)
+Écris toujours (void) pour être clair et compatible.
+
+
+5.5 La récursivité
+------------------
+Une fonction peut s'appeler elle-même. Il faut TOUJOURS un cas d'arrêt.
+
+   unsigned long long factorielle(unsigned n)
+   {
+       if (n <= 1)
+           return 1;                      // cas d'arrêt
+       return n * factorielle(n - 1);     // appel récursif
+   }
+
+Chaque appel occupe de la place sur la PILE (stack). Une récursion trop
+profonde (ou sans cas d'arrêt) provoque un débordement de pile (stack
+overflow) et un plantage.
+
+
+5.6 Variables locales static
+----------------------------
+Une variable locale normale est recréée à chaque appel. Une variable locale
+static est créée une seule fois et GARDE sa valeur entre les appels.
+
+   int compteur(void)
+   {
+       static int n = 0;     // initialisé une seule fois
+       n++;
+       return n;
+   }
+   // compteur() renvoie 1, puis 2, puis 3...
+
+
+5.7 inline, _Noreturn et [[noreturn]]
+-------------------------------------
+   static inline int max(int a, int b) { return a > b ? a : b; }
+inline SUGGÈRE au compilateur de recopier le corps de la fonction à la place de
+l'appel (évite le coût d'un appel). Le compilateur reste libre de refuser.
+En pratique on écrit "static inline" dans les .h.
+
+   [[noreturn]] void panique(void)      // C23 (avant : _Noreturn void ...)
+   {
+       for (;;) { }                     // ne revient jamais
+   }
+Indique que la fonction ne rend jamais la main (arrêt du programme, boucle
+infinie). Le compilateur peut en profiter pour optimiser et avertir.
+
+
+5.8 Fonctions à nombre variable d'arguments
+-------------------------------------------
+printf accepte un nombre variable d'arguments. Tu peux faire pareil avec
+<stdarg.h> (un en-tête sans code, fourni par le compilateur) :
+
+   #include <stdarg.h>
+
+   int somme(int nombre, ...)
+   {
+       va_list args;
+       va_start(args, nombre);           // commence après "nombre"
+       int total = 0;
+       for (int i = 0; i < nombre; i++)
+           total += va_arg(args, int);   // lit l'argument suivant comme int
+       va_end(args);
+       return total;
+   }
+   // somme(3, 10, 20, 30) renvoie 60
+
+La fonction ne peut pas savoir combien d'arguments elle a reçus : il faut le
+lui dire (ici avec le premier paramètre).
+
+
+EXERCICES DU CHAPITRE 5
+-----------------------
+5.1  Écris une fonction int pgcd(int a, int b) (algorithme d'Euclide), en
+     version boucle puis en version récursive.
+5.2  Écris une fonction bool est_premier(int n).
+5.3  Écris une fonction int puissance(int base, unsigned exp).
+
+
+================================================================================
+ 6. LES TABLEAUX
+================================================================================
+
+6.1 Déclarer et utiliser un tableau
+-----------------------------------
+Un tableau est une suite d'éléments du MÊME type, collés les uns aux autres
+en mémoire.
+
+   int notes[5];                 // 5 entiers, indices de 0 à 4
+   notes[0] = 12;                // le PREMIER élément est à l'indice 0
+   notes[4] = 18;                // le DERNIER est à l'indice taille - 1
+
+Initialisation :
+   int a[5] = {1, 2, 3, 4, 5};
+   int b[5] = {1, 2};            // {1, 2, 0, 0, 0} : le reste est mis à 0
+   int c[5] = {0};               // tout à 0
+   int d[5] = {};                // tout à 0 (C23)
+   int e[]  = {1, 2, 3};         // taille déduite : 3
+   int f[10] = {[3] = 7, [8] = 1};  // initialiseurs désignés (C99)
+
+Parcourir :
+   for (int i = 0; i < 5; i++) {
+       printf("%d\n", a[i]);
+   }
+
+Nombre d'éléments d'un tableau :
+   size_t n = sizeof(a) / sizeof(a[0]);    // taille totale / taille d'un élément
+ATTENTION : ça ne marche QUE sur un vrai tableau, pas sur un pointeur (voir
+6.4 et chapitre 8).
+
+
+6.2 AUCUNE vérification des bornes
+----------------------------------
+   int t[5];
+   t[5] = 1;      // HORS DU TABLEAU : comportement indéfini
+   t[-1] = 1;     // idem
+
+Le C ne vérifie rien. Écrire hors d'un tableau écrase d'autres variables, fait
+planter le programme ou, pire, semble marcher. C'est la source n°1 des failles
+de sécurité (débordement de tampon, "buffer overflow"). Compile avec
+-fsanitize=address pour détecter ces erreurs pendant tes tests.
+
+
+6.3 Tableaux à plusieurs dimensions
+-----------------------------------
+   int grille[3][4];             // 3 lignes, 4 colonnes
+
+   int m[2][3] = {
+       {1, 2, 3},
+       {4, 5, 6}
+   };
+   printf("%d\n", m[1][2]);      // 6 (ligne 1, colonne 2)
+
+   for (int l = 0; l < 2; l++)
+       for (int c = 0; c < 3; c++)
+           printf("%d ", m[l][c]);
+
+En mémoire, c'est un seul bloc de 6 int, ligne par ligne :
+   [1][2][3][4][5][6]
+
+
+6.4 Tableaux et fonctions
+-------------------------
+On ne peut PAS passer un tableau par valeur. Quand on passe un tableau à une
+fonction, c'est l'adresse de son premier élément qui est transmise (le tableau
+"se dégrade" en pointeur, chapitre 8). Conséquences :
+   1. la fonction ne connaît PAS la taille : il faut la passer en paramètre ;
+   2. la fonction PEUT modifier le tableau d'origine.
+
+   void remplir(int t[], size_t taille, int valeur)   // int t[] = int *t
+   {
+       for (size_t i = 0; i < taille; i++)
+           t[i] = valeur;
+   }
+
+   int main(void)
+   {
+       int tab[10];
+       remplir(tab, 10, 7);          // tab est bien modifié
+   }
+
+Dans la fonction, sizeof(t) donne la taille d'un POINTEUR (8), pas du tableau.
+
+Pour un tableau 2D, toutes les dimensions sauf la première sont obligatoires :
+   void afficher(int m[][3], size_t lignes);
+
+
+6.5 Tableaux de taille variable (VLA)
+-------------------------------------
+   void f(size_t n)
+   {
+       int t[n];       // taille connue seulement à l'exécution
+   }
+Existe depuis C99 mais est optionnel depuis C11. Le tableau est créé sur la
+pile : si n est grand, plantage sans prévenir. À éviter, surtout en programmation
+système (le noyau Linux les interdit).
+
+
+EXERCICES DU CHAPITRE 6
+-----------------------
+6.1  Écris une fonction qui renvoie le maximum d'un tableau d'int.
+6.2  Écris une fonction qui inverse un tableau sur place ({1,2,3} -> {3,2,1}).
+6.3  Écris un tri à bulles.
+
+
+================================================================================
+ 7. LES CHAÎNES DE CARACTÈRES
+================================================================================
+
+7.1 Une chaîne = un tableau de char terminé par '\0'
+----------------------------------------------------
+Le C n'a PAS de type "chaîne". Une chaîne est un tableau de char dont la fin
+est marquée par le caractère nul '\0' (valeur 0).
+
+   char mot[] = "Salut";
+
+En mémoire (6 octets, pas 5 !) :
+   indice :   0    1    2    3    4    5
+            ['S']['a']['l']['u']['t']['\0']
+
+Équivaut à : char mot[] = {'S', 'a', 'l', 'u', 't', '\0'};
+
+   char nom[20] = "Bob";   // 20 octets réservés, "Bob\0" au début, reste à 0
+
+Oublier le '\0' est une erreur grave : tout le code qui lit la chaîne
+continuera à lire la mémoire jusqu'à tomber par hasard sur un 0.
+
+
+7.2 Parcourir une chaîne sans bibliothèque
+------------------------------------------
+   size_t longueur(const char s[])
+   {
+       size_t n = 0;
+       while (s[n] != '\0')
+           n++;
+       return n;               // le '\0' n'est pas compté
+   }
+
+   void majuscules(char s[])
+   {
+       for (size_t i = 0; s[i] != '\0'; i++) {
+           if (s[i] >= 'a' && s[i] <= 'z')
+               s[i] = s[i] - 'a' + 'A';    // les lettres sont des nombres !
+       }
+   }
+
+   // chiffre en caractère -> valeur :  '7' - '0' vaut 7
+
+
+7.3 Ce qu'on ne peut PAS faire avec une chaîne
+----------------------------------------------
+   char a[10] = "abc";
+   char b[10];
+   b = a;              // ERREUR : on ne peut pas affecter un tableau
+   if (a == b)         // compare les ADRESSES, pas le contenu !
+   a = "xyz";          // ERREUR : pareil
+
+Il faut copier ou comparer caractère par caractère (les fonctions strcpy et
+strcmp de <string.h> le font, mais tu peux les écrire : c'est l'exercice 7.1).
+
+
+7.4 Tableau de char ou pointeur vers une chaîne littérale ?
+----------------------------------------------------------
+   char t[] = "Salut";       // TABLEAU : une copie modifiable de la chaîne
+   const char *p = "Salut";  // POINTEUR vers une chaîne littérale en mémoire
+                             // en lecture seule
+
+   t[0] = 's';               // OK
+   p[0] = 's';               // comportement indéfini (souvent un plantage)
+
+Pointe toujours une chaîne littérale avec un const char *. Détails au 8.9.
+
+
+EXERCICES DU CHAPITRE 7
+-----------------------
+7.1  Écris ma_copie(char dest[], const char src[]) qui copie src dans dest
+     (sans oublier le '\0'), et int ma_comparaison(const char a[],
+     const char b[]) qui renvoie 0 si les chaînes sont identiques.
+7.2  Écris une fonction qui dit si une chaîne est un palindrome ("kayak").
+7.3  Écris int en_entier(const char s[]) qui convertit "1234" en 1234.
+
+
+================================================================================
+ 8. LES POINTEURS
+================================================================================
+
+C'est LE chapitre qui fait la différence entre quelqu'un qui "tape du C" et
+quelqu'un qui comprend le C. Prends ton temps, dessine des cases sur papier,
+et teste chaque exemple. Si tu connais déjà l'assembleur, bonne nouvelle : un
+pointeur, c'est juste une adresse, comme [rbx] en NASM.
+
+
+8.1 La mémoire : une immense rangée de cases numérotées
+-------------------------------------------------------
+Imagine la mémoire comme une rangée de cases d'un octet. Chaque case a un
+NUMÉRO : son ADRESSE. Quand tu déclares une variable, le compilateur lui
+réserve des cases.
+
+   int x = 42;        // un int occupe 4 cases
+
+   Adresse :  ... | 0x7ffc10 | 0x7ffc14 | 0x7ffc18 | ...
+   Contenu :  ... |    ?     |    42    |    ?     | ...
+                               ^
+                               x est rangé ici (4 octets à partir de 0x7ffc14)
+
+(Les adresses sont inventées et simplifiées pour l'exemple.)
+
+Une variable a donc DEUX choses :
+   - sa VALEUR   : 42
+   - son ADRESSE : 0x7ffc14
+
+Un POINTEUR est simplement une variable dont la valeur est une ADRESSE.
+
+
+8.2 L'opérateur & : obtenir l'adresse d'une variable
+----------------------------------------------------
+   int x = 42;
+   printf("valeur  : %d\n", x);            // 42
+   printf("adresse : %p\n", (void *)&x);   // par exemple 0x7ffc14
+
+&x se lit "adresse de x". Tu l'as peut-être déjà vu avec scanf("%d", &x) :
+scanf a besoin de l'adresse pour pouvoir écrire dans x.
+
+
+8.3 Déclarer un pointeur
+------------------------
+   int *p;            // p est un pointeur vers un int
+   double *q;         // q est un pointeur vers un double
+   char *c;           // c est un pointeur vers un char
+
+L'étoile dans la DÉCLARATION signifie "ceci est un pointeur". Le type indique
+ce qu'il y a à l'adresse pointée (et donc combien d'octets lire et comment les
+interpréter).
+
+   int x = 42;
+   int *p = &x;       // p contient l'adresse de x. On dit "p pointe sur x".
+
+   Adresse :  0x7ffc14          0x7ffc20
+            +---------+       +----------+
+   x :      |   42    |   p : | 0x7ffc14 |
+            +---------+       +----------+
+                 ^                  |
+                 +------------------+
+
+Un pointeur est lui-même une variable : il a sa propre adresse (0x7ffc20 ici)
+et sa propre taille (8 octets sur un système 64 bits, QUEL QUE SOIT le type
+pointé : sizeof(char *) == sizeof(double *) == 8).
+
+PIÈGE DE SYNTAXE :
+   int* a, b;         // a est un pointeur, mais b est un int ordinaire !
+   int *a, *b;        // deux pointeurs
+C'est pourquoi on colle l'étoile au nom : int *a.
+
+
+8.4 L'opérateur * : accéder à la valeur pointée (déréférencer)
+--------------------------------------------------------------
+Dans une EXPRESSION (pas une déclaration), *p signifie "la case à l'adresse
+contenue dans p".
+
+   int x = 42;
+   int *p = &x;
+
+   printf("%d\n", *p);     // 42 : lit la valeur à l'adresse contenue dans p
+   *p = 100;               // ÉCRIT 100 à l'adresse contenue dans p
+   printf("%d\n", x);      // 100 : x a été modifié à travers p !
+
+Résumé à connaître par cœur :
+   p     l'adresse contenue dans p            (0x7ffc14)
+   *p    la valeur à cette adresse            (100)
+   &p    l'adresse de la variable p elle-même (0x7ffc20)
+   &x    l'adresse de x                       (0x7ffc14, pareil que p)
+   *&x   la valeur à l'adresse de x = x       (& et * s'annulent)
+
+Équivalent NASM :
+   mov rbx, adresse_de_x     ; p = &x
+   mov eax, [rbx]            ; lire *p
+   mov dword [rbx], 100      ; *p = 100
+
+Les deux sens de l'étoile, pour ne plus jamais confondre :
+   int *p = &x;    // DÉCLARATION : "p est de type pointeur sur int"
+   *p = 5;         // EXPRESSION  : "la valeur pointée par p"
+
+
+8.5 Le pointeur nul
+-------------------
+Un pointeur qui ne pointe sur rien doit valoir le POINTEUR NUL :
+   int *p = nullptr;       // C23
+   int *p = NULL;          // avant C23 (NULL est défini dans <stddef.h>)
+   int *p = 0;             // marche aussi, mais moins clair
+
+Déréférencer un pointeur nul est un comportement indéfini. Sur un PC, ça fait
+généralement planter le programme ("Segmentation fault").
+
+   if (p != nullptr) {     // ou simplement : if (p)
+       *p = 5;
+   }
+
+Un pointeur NON INITIALISÉ est pire qu'un pointeur nul : il contient une
+adresse au hasard, et écrire dedans corrompt la mémoire n'importe où.
+   int *p;          // DANGER : adresse aléatoire
+   *p = 5;          // bug grave, peut ne pas planter tout de suite
+Règle : un pointeur est TOUJOURS initialisé, avec une vraie adresse ou nullptr.
+
+
+8.6 À quoi servent les pointeurs ? Exemple 1 : modifier depuis une fonction
+---------------------------------------------------------------------------
+On a vu (5.3) qu'une fonction reçoit des COPIES. Cette fonction ne marche pas :
+
+   void echanger_rate(int a, int b)
+   {
+       int tmp = a;
+       a = b;
+       b = tmp;          // échange les copies, pas les originaux
+   }
+
+La solution : passer les ADRESSES.
+
+   void echanger(int *a, int *b)
+   {
+       int tmp = *a;     // tmp = valeur pointée par a
+       *a = *b;          // la case pointée par a reçoit la valeur pointée par b
+       *b = tmp;
+   }
+
+   int main(void)
+   {
+       int x = 1, y = 2;
+       echanger(&x, &y);             // on donne les adresses de x et y
+       printf("%d %d\n", x, y);      // 2 1
+   }
+
+Ce qui se passe :
+   main :     x [ 1 ] @0x100      y [ 2 ] @0x104
+   echanger : a [0x100]           b [0x104]      (copies des ADRESSES)
+   *a = *b    -> la case 0x100 reçoit 2
+   *b = tmp   -> la case 0x104 reçoit 1
+
+Le pointeur a été copié, mais une copie d'adresse pointe toujours au même
+endroit. C'est tout le principe.
+
+
+8.7 À quoi servent les pointeurs ? Exemple 2 : renvoyer plusieurs résultats
+---------------------------------------------------------------------------
+Une fonction ne renvoie qu'une valeur. Avec des pointeurs, elle peut en
+"renvoyer" plusieurs :
+
+   void division(int a, int b, int *quotient, int *reste)
+   {
+       *quotient = a / b;
+       *reste = a % b;
+   }
+
+   int q, r;
+   division(17, 5, &q, &r);      // q = 3, r = 2
+
+Convention très répandue : la fonction renvoie un code d'erreur et écrit le
+résultat via un pointeur.
+
+   bool diviser(int a, int b, int *resultat)
+   {
+       if (b == 0)
+           return false;         // échec, *resultat n'est pas touché
+       *resultat = a / b;
+       return true;
+   }
+
+Exemple 3 : éviter de copier de grosses structures (voir 8.14).
+
+
+8.8 L'arithmétique des pointeurs
+--------------------------------
+On peut ajouter ou retirer un entier à un pointeur. L'unité n'est PAS l'octet
+mais la TAILLE DU TYPE POINTÉ.
+
+   int t[4] = {10, 20, 30, 40};   // chaque int fait 4 octets
+   int *p = &t[0];                 // p = 0x200 (par exemple)
+
+   p + 1     vaut 0x204  (avance d'UN int, donc de 4 octets)
+   p + 3     vaut 0x20C
+   *(p + 2)  vaut 30
+
+   Adresse :  0x200  0x204  0x208  0x20C
+            +------+------+------+------+
+   t :      |  10  |  20  |  30  |  40  |
+            +------+------+------+------+
+               ^      ^      ^      ^
+               p     p+1    p+2    p+3
+
+Pour un char *, +1 avance d'un octet. Pour un double *, de 8 octets.
+
+Opérations permises :
+   p + n, p - n         avancer / reculer de n éléments
+   p++, p--, p += n     pareil, en modifiant p
+   p2 - p1              NOMBRE D'ÉLÉMENTS entre deux pointeurs du même tableau
+                        (type ptrdiff_t, s'affiche avec %td)
+   p1 == p2, p1 != p2   comparaison d'égalité
+   p1 < p2, etc.        seulement entre pointeurs du même tableau
+
+Opérations interdites : p1 + p2, p * 2, p / 2 (ça n'a pas de sens).
+
+Limite : un pointeur ne doit sortir du tableau que d'une case après la fin
+(pour servir de borne), et on ne doit jamais déréférencer cette case.
+
+   // parcourir un tableau avec un pointeur
+   for (int *q = t; q < t + 4; q++) {
+       printf("%d\n", *q);
+   }
+
+
+8.9 Pointeurs et tableaux : le lien fondamental
+-----------------------------------------------
+RÈGLE 1 : dans presque toutes les expressions, le nom d'un tableau est
+converti en un pointeur vers son premier élément. On dit que le tableau "se
+dégrade" en pointeur.
+   int t[4];
+   int *p = t;       // identique à int *p = &t[0];
+
+RÈGLE 2 : l'opérateur [] est défini par l'arithmétique des pointeurs :
+   t[i]   est EXACTEMENT   *(t + i)
+C'est pour ça que les indices commencent à 0 : t[0] = *(t + 0) = *t.
+Conséquence amusante (à ne jamais utiliser) : i[t] marche aussi, car
+*(t + i) == *(i + t).
+
+Donc ces lignes sont équivalentes :
+   t[2] = 5;    *(t + 2) = 5;    p[2] = 5;    *(p + 2) = 5;
+
+MAIS un tableau N'EST PAS un pointeur. Les différences :
+
+   int t[4];
+   int *p = t;
+
+   sizeof(t)   vaut 16 (4 int x 4 octets)      sizeof(p)   vaut 8
+   t = p;      ERREUR : un tableau ne peut pas être réaffecté
+   p = t;      OK : un pointeur peut changer de cible
+   &t          adresse du TABLEAU entier, de type int (*)[4]
+               (même valeur numérique que t, mais &t + 1 avance de 16 octets)
+
+Le tableau ne se dégrade pas dans trois cas : sizeof(t), &t, et
+l'initialisation d'un tableau de char par une chaîne ("...").
+
+C'est ce qui explique le 6.4 : dans une fonction, un paramètre int t[] est en
+réalité un int *t. La fonction ne reçoit qu'une adresse, et perd la taille.
+   void f(int t[])      est identique à      void f(int *t)
+
+
+8.10 Pointeurs et chaînes de caractères
+---------------------------------------
+Une chaîne se manipule presque toujours par un char * vers son premier
+caractère. On avance jusqu'au '\0'.
+
+   size_t longueur(const char *s)
+   {
+       const char *debut = s;
+       while (*s != '\0')
+           s++;
+       return (size_t)(s - debut);   // différence de pointeurs = nb de char
+   }
+
+   void copier(char *dest, const char *src)
+   {
+       while ((*dest++ = *src++) != '\0')
+           ;                          // corps vide : tout est dans la condition
+   }
+
+Décortiquons *dest++ = *src++ : ++ suffixe a une priorité plus forte que *,
+donc c'est *(dest++) = *(src++). On copie le caractère pointé par src dans la
+case pointée par dest, PUIS on avance les deux pointeurs. La valeur de
+l'affectation est le caractère copié : la boucle s'arrête après avoir copié le
+'\0'. C'est l'idiome classique du C, que tu verras partout.
+
+Priorités à retenir :
+   *p++     = *(p++) : lit la valeur, puis avance le POINTEUR
+   (*p)++   incrémente la VALEUR pointée, le pointeur ne bouge pas
+   *++p     avance le pointeur, puis lit la nouvelle case
+   ++*p     incrémente la valeur pointée
+
+Tableau ou pointeur, rappel du 7.4 en image :
+
+   char t[] = "Hi";            const char *p = "Hi";
+
+   t : [ 'H' ][ 'i' ][ '\0' ]  p : [ adresse ] ----> [ 'H' ][ 'i' ][ '\0' ]
+       (copie modifiable,                            (zone en lecture seule,
+        sur la pile)                                  dans le programme)
+
+
+8.11 Pointeurs et const
+-----------------------
+const peut s'appliquer à la valeur pointée, au pointeur, ou aux deux.
+Astuce : lis la déclaration de DROITE à GAUCHE.
+
+   int x = 1, y = 2;
+
+   const int *p1 = &x;   // "p1 est un pointeur vers un int constant"
+   *p1 = 5;              // ERREUR : on ne peut pas modifier la valeur pointée
+   p1 = &y;              // OK : le pointeur peut changer de cible
+   // int const *p1 est exactement la même chose
+
+   int *const p2 = &x;   // "p2 est un pointeur constant vers un int"
+   *p2 = 5;              // OK : la valeur pointée est modifiable
+   p2 = &y;              // ERREUR : p2 pointera toujours sur x
+
+   const int *const p3 = &x;   // rien n'est modifiable
+
+Usage essentiel : dans les paramètres de fonction, const int *t promet que la
+fonction ne modifiera pas les données. Ça documente le code et le compilateur
+vérifie la promesse.
+   size_t longueur(const char *s);        // ne modifie pas la chaîne
+   void copier(char *dest, const char *src);
+
+
+8.12 Le pointeur générique void *
+---------------------------------
+Un void * peut contenir l'adresse de N'IMPORTE QUEL type d'objet. Il se
+convertit automatiquement vers et depuis tout autre pointeur d'objet.
+
+   int x = 5;
+   double d = 2.5;
+   void *g = &x;         // OK
+   g = &d;               // OK
+
+Mais on ne peut NI le déréférencer NI faire d'arithmétique dessus, car le
+compilateur ne connaît pas la taille de ce qui est pointé :
+   *g;                   // ERREUR
+   g + 1;                // ERREUR en C standard (gcc l'accepte comme extension)
+
+Il faut d'abord le convertir :
+   double *pd = g;
+   printf("%f\n", *pd);
+
+Usage : écrire des fonctions génériques qui travaillent sur des octets bruts.
+
+   void mon_memset(void *zone, unsigned char valeur, size_t taille)
+   {
+       unsigned char *octet = zone;       // on regarde la zone octet par octet
+       for (size_t i = 0; i < taille; i++)
+           octet[i] = valeur;
+   }
+
+   int tab[10];
+   mon_memset(tab, 0, sizeof(tab));       // met les 40 octets à 0
+
+On peut toujours examiner n'importe quel objet via un unsigned char * : c'est
+autorisé par la norme et c'est la bonne façon de voir les octets d'une
+variable.
+
+   int n = 0x12345678;
+   unsigned char *o = (unsigned char *)&n;
+   for (size_t i = 0; i < sizeof(n); i++)
+       printf("%02x ", o[i]);     // "78 56 34 12" sur x86 : little-endian !
+
+
+8.13 Les pointeurs de pointeurs
+-------------------------------
+Un pointeur est une variable, il a donc une adresse, qu'on peut stocker dans...
+un pointeur de pointeur.
+
+   int x = 42;
+   int *p = &x;
+   int **pp = &p;
+
+   pp [0x300] ---> p [0x100] ---> x [42]
+                   @0x300         @0x100
+
+   *pp   vaut p (0x100)
+   **pp  vaut x (42)
+   **pp = 7;   // modifie x
+
+Usage 1 : modifier un POINTEUR depuis une fonction. Même logique que pour un
+int : pour modifier un int, on passe un int * ; pour modifier un int *, on
+passe un int **.
+
+   void trouver_max(int *t, size_t n, int **pos_max)
+   {
+       *pos_max = &t[0];
+       for (size_t i = 1; i < n; i++)
+           if (t[i] > **pos_max)
+               *pos_max = &t[i];
+   }
+
+   int tab[] = {3, 9, 2};
+   int *m = nullptr;
+   trouver_max(tab, 3, &m);     // m pointe maintenant sur tab[1]
+   *m = 0;                      // tab devient {3, 0, 2}
+
+Usage 2 : les arguments de la ligne de commande.
+   int main(int argc, char *argv[])     // ou char **argv, c'est pareil
+
+   ./prog bonjour 42
+   argc = 3
+   argv ---> [ ptr ] ---> "./prog"
+             [ ptr ] ---> "bonjour"
+             [ ptr ] ---> "42"
+             [ nullptr ]  (argv[argc] est toujours nul)
+
+   for (int i = 0; i < argc; i++)
+       printf("argument %d : %s\n", i, argv[i]);
+
+
+8.14 Pointeurs vers des structures (aperçu, détails au chapitre 9)
+------------------------------------------------------------------
+   struct point { int x; int y; };
+
+   struct point a = {1, 2};
+   struct point *p = &a;
+
+   (*p).x = 10;       // parenthèses obligatoires : . est prioritaire sur *
+   p->x = 10;         // EXACTEMENT pareil, en plus lisible
+
+Passer un pointeur vers une structure plutôt que la structure elle-même évite
+une copie (une structure peut faire des centaines d'octets) et permet de la
+modifier. Ajoute const si la fonction ne doit que lire :
+   void afficher_point(const struct point *p)
+   {
+       printf("(%d, %d)\n", p->x, p->y);
+   }
+
+
+8.15 Tableaux de pointeurs et pointeurs vers tableaux
+-----------------------------------------------------
+Les parenthèses changent tout :
+
+   int *a[3];      // a est un TABLEAU de 3 pointeurs vers int
+   int (*b)[3];    // b est un POINTEUR vers un tableau de 3 int
+
+   int x = 1, y = 2, z = 3;
+   int *a[3] = {&x, &y, &z};       // *a[1] vaut 2
+
+   int t[3] = {7, 8, 9};
+   int (*b)[3] = &t;               // (*b)[1] vaut 8
+
+Tableau de chaînes (très courant) :
+   const char *jours[] = {"lundi", "mardi", "mercredi"};
+   printf("%s\n", jours[1]);       // mardi
+   printf("%c\n", jours[1][0]);    // m
+
+
+8.16 Les pointeurs de fonction
+------------------------------
+Le code d'une fonction est aussi en mémoire, à une adresse. On peut stocker
+cette adresse dans un pointeur et appeler la fonction à travers lui.
+
+   int addition(int a, int b)       { return a + b; }
+   int multiplication(int a, int b) { return a * b; }
+
+   int (*op)(int, int);    // op est un pointeur vers une fonction qui prend
+                           // deux int et renvoie un int
+   op = addition;          // le nom d'une fonction donne son adresse (&addition
+                           // marche aussi)
+   printf("%d\n", op(3, 4));   // 7   ((*op)(3, 4) marche aussi)
+   op = multiplication;
+   printf("%d\n", op(3, 4));   // 12
+
+ATTENTION aux parenthèses :
+   int (*f)(int);    // f est un POINTEUR vers une fonction renvoyant un int
+   int *f(int);      // f est une FONCTION renvoyant un pointeur vers int
+
+Usage 1 : les CALLBACKS, passer un comportement à une fonction.
+   void appliquer(int *t, size_t n, int (*transfo)(int))
+   {
+       for (size_t i = 0; i < n; i++)
+           t[i] = transfo(t[i]);
+   }
+
+   int doubler(int x) { return 2 * x; }
+
+   int tab[] = {1, 2, 3};
+   appliquer(tab, 3, doubler);      // tab devient {2, 4, 6}
+
+Usage 2 : les TABLES DE FONCTIONS (menus, interpréteurs, tables d'appels
+système, vecteurs d'interruption dans un OS).
+   int (*operations[])(int, int) = {addition, multiplication};
+   printf("%d\n", operations[1](5, 6));    // 30
+
+typedef rend tout ça lisible :
+   typedef int (*operation_t)(int, int);
+   operation_t ops[] = {addition, multiplication};
+   void calculer(operation_t f);
+
+
+8.17 Lire une déclaration compliquée
+------------------------------------
+Méthode : pars du NOM, lis à DROITE tant que possible, puis à GAUCHE, en
+sortant des parenthèses au fur et à mesure.
+   [ ]  se lit "tableau de"      ( )  se lit "fonction renvoyant"
+   *    se lit "pointeur vers"
+
+   int *p[5];
+      p -> [5] "tableau de 5" -> * "pointeurs vers" -> int
+      = tableau de 5 pointeurs vers int
+
+   int (*p)[5];
+      p -> ) on sort : * "pointeur vers" -> [5] "tableau de 5" -> int
+      = pointeur vers un tableau de 5 int
+
+   char *(*f)(int);
+      f -> * "pointeur vers" -> (int) "fonction prenant un int renvoyant"
+        -> * "pointeur vers" -> char
+      = pointeur vers une fonction prenant un int et renvoyant un char *
+
+   void (*signal(int, void (*)(int)))(int);
+      = signal est une fonction prenant un int et un pointeur de fonction,
+        et renvoyant un pointeur vers une fonction prenant un int et ne
+        renvoyant rien. (C'est le vrai prototype de signal() ! Avec un typedef,
+        ça devient : typedef void (*gestionnaire_t)(int);
+                     gestionnaire_t signal(int, gestionnaire_t);)
+
+
+8.18 Durée de vie : pile, tas, et pointeurs pendants
+----------------------------------------------------
+Où vivent les variables :
+   - PILE (stack) : variables locales et paramètres. Créées à l'entrée du bloc,
+     DÉTRUITES à la sortie. Automatique et rapide, mais limitée (~8 Mo).
+   - ZONE STATIQUE : variables globales et static. Vivent toute l'exécution.
+   - TAS (heap) : mémoire demandée à la main pendant l'exécution avec malloc et
+     rendue avec free (fonctions de <stdlib.h>, donc de la bibliothèque). Sans
+     bibliothèque, dans un noyau par exemple, c'est à toi d'écrire
+     l'allocateur.
+
+ERREUR MORTELLE : renvoyer l'adresse d'une variable locale.
+   int *mauvais(void)
+   {
+       int x = 42;
+       return &x;          // x est détruit à la sortie de la fonction !
+   }
+   int *p = mauvais();     // p est un POINTEUR PENDANT (dangling pointer)
+   *p;                     // comportement indéfini
+
+Le compilateur avertit (-Wall) dans ce cas simple, mais pas toujours.
+Solutions : faire passer par l'appelant un pointeur vers une zone qu'il
+possède (voir 8.7), utiliser une variable static, ou allouer sur le tas.
+
+Même problème en sortant d'un bloc :
+   int *p;
+   {
+       int y = 5;
+       p = &y;
+   }
+   *p;                     // y n'existe plus : comportement indéfini
+
+
+8.19 restrict
+-------------
+   void copier_zone(char *restrict dest, const char *restrict src, size_t n);
+
+restrict est une PROMESSE faite au compilateur : pendant la fonction, la zone
+pointée par dest n'est accessible QUE par dest (les zones ne se chevauchent
+pas). Le compilateur peut alors optimiser beaucoup plus (vectorisation).
+Si la promesse est fausse, c'est un comportement indéfini. C'est la différence
+entre memcpy (restrict, zones séparées obligatoires) et memmove (chevauchement
+autorisé).
+
+
+8.20 Accéder au matériel : pointeurs vers des adresses fixes
+------------------------------------------------------------
+En programmation système, certaines adresses correspondent à du matériel. On
+convertit un entier en pointeur, et on ajoute volatile pour dire au compilateur
+que la valeur peut changer toute seule (il ne doit pas optimiser les lectures
+ni supprimer les écritures "inutiles").
+
+Exemple classique : la mémoire texte VGA d'un PC en mode texte, à l'adresse
+0xB8000. Chaque case d'écran = 2 octets : le caractère, puis la couleur.
+
+   #include <stddef.h>     // size_t
+   #include <stdint.h>     // uint8_t, uint16_t
+
+   #define VGA_ADRESSE 0xB8000
+
+   void ecrire_ecran(const char *msg)
+   {
+       volatile uint16_t *vga = (volatile uint16_t *)VGA_ADRESSE;
+       for (size_t i = 0; msg[i] != '\0'; i++)
+           vga[i] = (uint16_t)(0x0F << 8) | (uint8_t)msg[i];  // blanc sur noir
+   }
+
+(Ce code ne fonctionne que dans un noyau ou un bootloader, pas dans un
+programme Linux normal, qui planterait : il n'a pas accès à cette adresse.)
+
+Pour stocker une adresse dans un entier, utilise uintptr_t (de <stdint.h>),
+garanti assez grand pour contenir un pointeur :
+   uintptr_t adr = (uintptr_t)&x;
+
+
+8.21 Les erreurs classiques avec les pointeurs (check-list)
+-----------------------------------------------------------
+ 1. Pointeur non initialisé                  int *p; *p = 1;
+ 2. Déréférencer un pointeur nul             int *p = nullptr; *p = 1;
+ 3. Pointeur pendant                         adresse d'une locale détruite
+ 4. Sortir d'un tableau                      p = t + 10 sur un tableau de 5
+ 5. Oublier le & à l'appel                   echanger(x, y) au lieu de (&x, &y)
+ 6. Oublier l'étoile                         p = 5 au lieu de *p = 5
+ 7. int* a, b;                               b n'est pas un pointeur
+ 8. sizeof sur un pointeur                   sizeof(p) donne 8, pas la taille
+                                             du tableau
+ 9. Comparer des chaînes avec ==             compare les adresses
+10. Modifier une chaîne littérale            char *s = "abc"; s[0] = 'x';
+11. Confondre *p++ et (*p)++                 voir 8.10
+12. Lire un objet via un pointeur d'un type  float f; int *p = (int *)&f; *p
+    incompatible                             comportement indéfini ("strict
+                                             aliasing"). Exceptions : char et
+                                             unsigned char. Pour réinterpréter
+                                             des octets, copie-les octet par
+                                             octet ou utilise une union.
+
+Outils pour les trouver :
+   gcc -g -fsanitize=address,undefined prog.c -o prog   (détecte à l'exécution)
+   gdb ./prog
+      (gdb) break main          point d'arrêt
+      (gdb) run
+      (gdb) next                ligne suivante
+      (gdb) print p             affiche l'adresse
+      (gdb) print *p            affiche la valeur pointée
+      (gdb) print t[2]@3        affiche 3 éléments à partir de t[2]
+      (gdb) x/8xb p             affiche 8 octets en hexa à l'adresse p
+      (gdb) backtrace           pile d'appels après un plantage
+
+
+EXERCICES DU CHAPITRE 8
+-----------------------
+8.1  Déclare int x = 10, un pointeur p sur x et un pointeur de pointeur pp
+     sur p. Modifie x à travers pp. Affiche les adresses de x, p et pp, et
+     les valeurs de p, *p, pp, *pp et **pp. Dessine les cases sur papier.
+8.2  Écris void min_max(const int *t, size_t n, int *min, int *max).
+8.3  Réécris la fonction longueur, inverser un tableau (6.2) et le
+     palindrome (7.2) en utilisant UNIQUEMENT des pointeurs, sans [].
+8.4  Écris void trier(int *t, size_t n, bool (*avant)(int, int)) : un tri à
+     bulles qui utilise la fonction "avant" pour décider de l'ordre. Teste-le
+     avec une fonction croissante et une fonction décroissante.
+8.5  Affiche les octets d'un double valant 1.0 (via un unsigned char *).
+8.6  Trouve les bugs :
+        int *f(void) { int t[3] = {1, 2, 3}; return t; }
+        void g(int *p) { p = nullptr; }      // censée mettre p à nul
+        char *s = "abc"; s[0] = 'A';
+
+
+================================================================================
+ 9. STRUCTURES, UNIONS, ÉNUMÉRATIONS ET TYPEDEF
+================================================================================
+
+9.1 struct : regrouper des données
+----------------------------------
+Une structure regroupe plusieurs variables (des MEMBRES ou CHAMPS), de types
+éventuellement différents, sous un seul nom.
+
+   struct personne {
+       char nom[32];
+       int age;
+       double taille;
+   };                          // NE PAS oublier le point-virgule
+
+   struct personne p;          // "struct personne" est le nom du type
+   p.age = 30;                 // accès avec le point
+   p.taille = 1.80;
+
+Initialisation :
+   struct personne a = {"Alice", 30, 1.65};              // dans l'ordre
+   struct personne b = {.age = 25, .nom = "Bob"};        // désignée (C99),
+                                                         // le reste vaut 0
+   struct personne c = {};                               // tout à 0 (C23)
+
+Contrairement aux tableaux, une structure PEUT être copiée par affectation,
+passée et renvoyée par valeur :
+   struct personne d = a;      // copie tous les octets
+Mais on ne peut PAS comparer deux structures avec == : il faut comparer champ
+par champ.
+
+Structures imbriquées et tableaux de structures :
+   struct point { int x, y; };
+   struct rectangle { struct point coin_haut_gauche, coin_bas_droit; };
+
+   struct rectangle r = {{0, 0}, {10, 5}};
+   r.coin_bas_droit.x = 20;
+
+   struct point trajet[100];
+   trajet[3].y = 7;
+
+
+9.2 Structures et pointeurs
+---------------------------
+   void vieillir(struct personne *p)
+   {
+       p->age++;               // p->age est un raccourci de (*p).age
+   }
+
+   vieillir(&a);
+
+Passe les structures par pointeur (const si lecture seule) pour éviter les
+copies coûteuses.
+
+Littéral composé (C99) : créer une structure temporaire sans nom :
+   afficher_point(&(struct point){3, 4});
+
+
+9.3 Structures auto-référentes : la liste chaînée
+-------------------------------------------------
+Une structure ne peut pas se contenir elle-même, mais elle peut contenir un
+POINTEUR vers une structure du même type. C'est la base des listes chaînées,
+des arbres et des graphes.
+
+   struct noeud {
+       int valeur;
+       struct noeud *suivant;
+   };
+
+   struct noeud n3 = {30, nullptr};
+   struct noeud n2 = {20, &n3};
+   struct noeud n1 = {10, &n2};
+
+   n1 [10 | *]--> n2 [20 | *]--> n3 [30 | nullptr]
+
+   for (struct noeud *courant = &n1; courant != nullptr;
+        courant = courant->suivant) {
+       printf("%d\n", courant->valeur);
+   }
+
+(Dans un vrai programme, les noeuds sont en général alloués sur le tas pour
+que la liste puisse grandir.)
+
+
+9.4 Alignement et remplissage (padding)
+---------------------------------------
+Le processeur préfère lire les données à des adresses multiples de leur
+taille. Le compilateur ajoute donc des octets de remplissage invisibles.
+
+   struct exemple {
+       char a;      // 1 octet, puis 3 octets de remplissage
+       int b;       // 4 octets (doit être à une adresse multiple de 4)
+       char c;      // 1 octet, puis 3 octets de remplissage final
+   };
+   // sizeof(struct exemple) vaut 12, pas 6 !
+
+   struct mieux {
+       int b;
+       char a;
+       char c;      // 2 octets de remplissage final
+   };
+   // sizeof(struct mieux) vaut 8
+
+Règle : range les champs du plus grand au plus petit pour gagner de la place.
+
+offsetof(type, champ), de <stddef.h>, donne la position d'un champ en octets :
+   offsetof(struct exemple, b)   vaut 4
+
+Pour une structure qui doit correspondre octet pour octet à un format fixe
+(en-tête de fichier, structure matérielle comme une entrée de GDT ou d'IDT),
+gcc propose __attribute__((packed)), qui supprime le remplissage. Ce n'est pas
+standard.
+
+
+9.5 Champs de bits (bit-fields)
+-------------------------------
+On peut préciser le nombre de bits d'un champ entier :
+   struct drapeaux {
+       unsigned int present   : 1;
+       unsigned int ecriture  : 1;
+       unsigned int utilisateur : 1;
+       unsigned int reserve   : 9;
+       unsigned int adresse   : 20;
+   };
+
+   struct drapeaux d = {0};
+   d.present = 1;
+
+Pratique, mais l'ordre des bits en mémoire dépend du compilateur. Pour coller
+exactement à un registre matériel, les masques et décalages (3.5) sont plus
+portables. On ne peut pas prendre l'adresse d'un champ de bits.
+
+
+9.6 Membre tableau flexible
+---------------------------
+Le dernier champ d'une structure peut être un tableau sans taille :
+   struct message {
+       size_t longueur;
+       char donnees[];      // taille non comptée dans sizeof
+   };
+Utile avec de la mémoire allouée : on réserve sizeof(struct message) + n
+octets et donnees contient n caractères.
+
+
+9.7 union : plusieurs interprétations d'une même zone
+-----------------------------------------------------
+Une union se déclare comme une structure, mais TOUS les membres commencent à
+la même adresse et se partagent la même mémoire. Sa taille est celle du plus
+grand membre. Un seul membre est "actif" à la fois.
+
+   union valeur {
+       int entier;
+       float flottant;
+       unsigned char octets[4];
+   };
+
+   union valeur v;
+   v.entier = 65;
+   v.flottant = 1.5f;      // écrase entier
+
+Usage 1 : voir les octets d'une valeur (autorisé en C, contrairement au C++) :
+   v.flottant = 1.0f;
+   // v.octets contient maintenant les 4 octets IEEE 754 de 1.0 : 00 00 80 3f
+
+Usage 2 : l'union étiquetée, une variable qui peut être de plusieurs types :
+   enum type_valeur { ENTIER, TEXTE };
+
+   struct variant {
+       enum type_valeur type;      // "l'étiquette" dit quel membre est actif
+       union {                     // union anonyme (C11)
+           int entier;
+           const char *texte;
+       };
+   };
+
+   struct variant x = {.type = TEXTE, .texte = "bonjour"};
+   if (x.type == TEXTE)
+       printf("%s\n", x.texte);
+
+
+9.8 enum : des constantes entières nommées
+------------------------------------------
+   enum couleur { ROUGE, VERT, BLEU };        // ROUGE = 0, VERT = 1, BLEU = 2
+
+   enum couleur c = VERT;
+
+   enum niveau { BAS = 10, MOYEN = 20, HAUT };   // HAUT vaut 21
+
+   enum { TAILLE_BUFFER = 256 };   // enum anonyme : astuce pour une constante
+
+C23 permet de choisir le type sous-jacent :
+   enum commande : uint8_t { LIRE = 1, ECRIRE = 2 };
+
+Les enum se marient très bien avec switch : -Wall avertit si un cas manque.
+Attention : un enum n'est pas vérifié, rien n'empêche c = 42.
+
+
+9.9 typedef : donner un nouveau nom à un type
+---------------------------------------------
+typedef ne crée pas de nouveau type, juste un ALIAS.
+
+   typedef unsigned char octet;
+   octet o = 255;
+
+   typedef struct {
+       int x, y;
+   } point;
+   point p = {1, 2};           // plus besoin d'écrire "struct"
+
+   typedef struct noeud {      // nom obligatoire si la structure s'utilise
+       int valeur;             // elle-même
+       struct noeud *suivant;
+   } noeud;
+
+   typedef int (*comparateur)(int, int);   // pointeur de fonction (8.16)
+   typedef int matrice[3][3];              // type tableau
+
+Convention courante : suffixe _t (taille_t, pid_t...). Note que POSIX réserve
+en théorie ce suffixe, mais tout le monde l'utilise dans ses projets.
+Le noyau Linux déconseille typedef sur les structures : écrire "struct" montre
+clairement ce qu'on manipule. C'est une question de goût.
+
+
+EXERCICES DU CHAPITRE 9
+-----------------------
+9.1  Définis une structure date (jour, mois, année) et une fonction qui
+     renvoie true si une date est antérieure à une autre.
+9.2  Crée un tableau de 5 struct personne et écris une fonction qui renvoie
+     un pointeur vers la personne la plus âgée.
+9.3  Construis une liste chaînée de 5 noeuds (dans un tableau de noeuds),
+     puis écris une fonction qui l'inverse en modifiant les pointeurs suivant.
+9.4  Affiche sizeof de plusieurs structures et vérifie le remplissage avec
+     offsetof.
+
+
+================================================================================
+ 10. QUALIFICATEURS, CLASSES DE STOCKAGE ET PROGRAMMES EN PLUSIEURS FICHIERS
+================================================================================
+
+10.1 Les qualificateurs de type
+-------------------------------
+const
+   La variable ne peut plus être modifiée après son initialisation.
+      const int MAX = 100;
+      MAX = 5;                // ERREUR de compilation
+   Attention : en C, un const n'est pas une vraie constante de compilation (on
+   ne peut pas s'en servir comme case d'un switch). Pour ça : enum, #define,
+   ou constexpr (C23).
+
+volatile
+   La valeur peut changer en dehors du programme : registre matériel, variable
+   modifiée par une interruption ou un gestionnaire de signal. Le compilateur
+   relit la valeur à chaque accès au lieu de la garder en cache.
+      volatile int drapeau_interruption = 0;
+   const volatile est possible : un registre en lecture seule que le matériel
+   modifie.
+
+restrict
+   Voir 8.19. Ne s'applique qu'aux pointeurs.
+
+_Atomic
+   Les opérations simples sur la variable sont atomiques (non interruptibles
+   par un autre thread).
+      _Atomic int compteur;
+   Optionnel : un compilateur peut ne pas le supporter.
+
+
+10.2 Les classes de stockage
+----------------------------
+auto
+   Historiquement : "variable locale automatique". C'était implicite, donc
+   personne ne l'écrivait. Depuis C23 : déduction du type.
+      auto x = 3.5;           // x est un double
+
+register
+   Suggestion de ranger la variable dans un registre du processeur. Les
+   compilateurs l'ignorent (ils optimisent mieux seuls). Seul effet réel :
+   interdit de prendre l'adresse de la variable avec &.
+
+static
+   Deux sens selon l'endroit :
+   - Dans une fonction : la variable garde sa valeur entre les appels (5.6).
+   - Hors d'une fonction (variable ou fonction) : visible UNIQUEMENT dans ce
+     fichier .c. C'est la manière de rendre quelque chose "privé".
+        static int compteur_interne = 0;
+        static void aide(void) { }
+   (Troisième usage rare : void f(int t[static 10]) promet que t pointe au
+    moins 10 éléments.)
+
+extern
+   Déclare qu'une variable ou fonction est DÉFINIE dans un autre fichier.
+   Ne réserve pas de mémoire.
+      extern int compteur_global;     // la vraie définition est ailleurs
+   Les fonctions sont extern par défaut.
+
+thread_local (C23) / _Thread_local (C11)
+   Chaque thread a sa propre copie de la variable.
+      thread_local int erreur_courante;
+
+constexpr (C23)
+   Une vraie constante évaluée à la compilation, utilisable partout où une
+   constante est exigée :
+      constexpr int TAILLE = 64;
+      int tampon[TAILLE];             // pas un VLA : taille fixe
+      switch (x) { case TAILLE: ... }
+
+
+10.3 Déclaration et définition
+------------------------------
+   DÉCLARATION : "cette chose existe, voici son type"   (peut être répétée)
+   DÉFINITION  : "voici la chose, réserve la mémoire / voici le code"
+                 (UNE seule fois dans tout le programme)
+
+   extern int n;              // déclaration
+   int n = 5;                 // définition
+   int carre(int x);          // déclaration (prototype)
+   int carre(int x) { ... }   // définition
+
+
+10.4 Découper un programme en plusieurs fichiers
+------------------------------------------------
+On sépare l'INTERFACE (.h : ce qui est utilisable de l'extérieur) de
+l'IMPLÉMENTATION (.c : le code).
+
+--- maths.h ---
+   #ifndef MATHS_H            // "include guard" : évite une double inclusion
+   #define MATHS_H
+
+   extern int nb_appels;      // déclaration de variable
+   int carre(int x);          // prototypes
+   int cube(int x);
+
+   #endif
+
+--- maths.c ---
+   #include "maths.h"         // guillemets : fichier du projet
+
+   int nb_appels = 0;         // définition
+
+   static int multiplier(int a, int b)   // privée à ce fichier
+   {
+       nb_appels++;
+       return a * b;
+   }
+
+   int carre(int x) { return multiplier(x, x); }
+   int cube(int x)  { return multiplier(x, carre(x)); }
+
+--- main.c ---
+   #include <stdio.h>         // chevrons : en-tête du système
+   #include "maths.h"
+
+   int main(void)
+   {
+       printf("%d\n", cube(3));
+       printf("appels : %d\n", nb_appels);
+   }
+
+Compilation :
+   gcc -std=c23 -Wall -Wextra main.c maths.c -o prog
+ou fichier par fichier (seuls les fichiers modifiés sont recompilés) :
+   gcc -c main.c         -> main.o
+   gcc -c maths.c        -> maths.o
+   gcc main.o maths.o -o prog
+
+Ce qu'on met dans un .h : prototypes, déclarations extern, définitions de
+types (struct, enum, typedef), macros, fonctions static inline.
+Ce qu'on NE met PAS dans un .h : des définitions de variables ou de fonctions
+normales (elles seraient définies plusieurs fois : erreur "multiple
+definition" à l'édition de liens).
+
+
+EXERCICES DU CHAPITRE 10
+------------------------
+10.1 Découpe ton code de liste chaînée (9.3) en liste.h, liste.c et main.c.
+10.2 Crée un module compteur.c avec une variable privée (static) et des
+     fonctions publiques incrementer() et valeur().
+
+
+================================================================================
+ 11. LE PRÉPROCESSEUR
+================================================================================
+
+Le préprocesseur agit AVANT la compilation. Il fait du remplacement de TEXTE,
+sans rien comprendre au C. Ses directives commencent par # et tiennent sur une
+ligne (on peut continuer avec \ en fin de ligne).
+Pour voir le résultat : gcc -E fichier.c
+
+11.1 #include
+-------------
+Copie-colle le contenu d'un fichier à cet endroit.
+   #include <stdint.h>     // cherche dans les dossiers du système
+   #include "mon.h"        // cherche d'abord dans le dossier du fichier
+Ajouter un dossier de recherche : gcc -I chemin/vers/dossier
+
+
+11.2 #define et #undef : les macros
+----------------------------------
+Macro simple (constante) :
+   #define TAILLE 100
+   #define PI 3.14159
+   int t[TAILLE];          // devient int t[100];
+
+Pas de = et pas de ; :
+   #define TAILLE = 100;   // ERREUR : int t[TAILLE] devient int t[= 100;]
+
+Macro avec paramètres :
+   #define CARRE(x) ((x) * (x))
+   #define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+LES PIÈGES DES MACROS :
+   #define CARRE_FAUX(x) x * x
+   CARRE_FAUX(2 + 1)     devient  2 + 1 * 2 + 1   = 5, pas 9 !
+   -> mets des parenthèses autour de chaque paramètre ET du tout.
+
+   CARRE(i++)            devient  ((i++) * (i++))  : i modifié deux fois,
+                                                     comportement indéfini !
+   -> ne passe jamais d'expression avec effet de bord à une macro. Préfère
+      une fonction static inline quand c'est possible.
+
+Macro sur plusieurs instructions : l'idiome do { } while (0)
+   #define ECHANGER(a, b) do { int _t = (a); (a) = (b); (b) = _t; } while (0)
+   Ça permet d'écrire ECHANGER(x, y); partout, même dans un if sans accolades.
+
+Supprimer une macro :
+   #undef TAILLE
+
+Définir une macro depuis la ligne de commande : gcc -DDEBUG -DNIVEAU=3
+
+
+11.3 Les opérateurs # et ##
+---------------------------
+   #   transforme un paramètre en chaîne de caractères
+   ##  colle deux morceaux pour former un seul nom
+
+   #define AFFICHER_INT(var) printf(#var " = %d\n", var)
+   AFFICHER_INT(age);      // devient printf("age" " = %d\n", age);
+                           // (deux chaînes collées = une seule chaîne)
+
+   #define REGISTRE(n) registre_##n
+   int REGISTRE(ax) = 0;   // devient int registre_ax = 0;
+
+
+11.4 Macros à nombre variable d'arguments
+-----------------------------------------
+   #define LOG(fmt, ...) printf("[LOG] " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
+   LOG("démarrage");
+   LOG("valeur = %d", 42);
+__VA_ARGS__ représente les arguments supplémentaires. __VA_OPT__(,) (C23)
+n'ajoute la virgule que s'il y en a.
+
+
+11.5 La compilation conditionnelle
+----------------------------------
+   #if expression_constante
+   #elif autre_expression
+   #else
+   #endif
+
+   #ifdef NOM        // si la macro NOM est définie
+   #ifndef NOM       // si elle n'est PAS définie
+   #elifdef NOM      // C23
+   #elifndef NOM     // C23
+   defined(NOM)      // utilisable dans #if : #if defined(A) && !defined(B)
+
+Exemples :
+   #ifdef DEBUG
+       printf("x = %d\n", x);     // compilé seulement avec gcc -DDEBUG
+   #endif
+
+   #if 0
+       code désactivé temporairement (mieux que /* */ car ça s'imbrique)
+   #endif
+
+   #if __STDC_VERSION__ >= 202311L
+       // code réservé à C23
+   #endif
+
+L'include guard (vu au 10.4) utilise #ifndef / #define / #endif.
+#pragma once fait la même chose en une ligne. Ce n'est pas standard, mais gcc,
+clang et MSVC le supportent.
+
+
+11.6 Les autres directives
+--------------------------
+   #error "message"     arrête la compilation avec ce message
+   #warning "message"   affiche un avertissement sans arrêter (C23)
+
+      #if !defined(__x86_64__)
+      #error "Ce code nécessite une architecture x86-64"
+      #endif
+
+   #pragma ...          instruction propre au compilateur, ignorée si inconnue
+      #pragma once
+      #pragma GCC diagnostic ignored "-Wunused-variable"
+
+   #line 100 "autre.c"  change le numéro de ligne et le nom de fichier affichés
+                        dans les erreurs (utilisé par les générateurs de code)
+
+   #embed "fichier"     (C23) insère le contenu binaire d'un fichier sous forme
+                        de liste d'octets. Supporté à partir de gcc 15 et
+                        clang 19.
+      const unsigned char police[] = {
+      #embed "police.bin"
+      };
+
+
+11.7 Les macros prédéfinies
+---------------------------
+   __FILE__             nom du fichier en cours (chaîne)
+   __LINE__             numéro de la ligne en cours (entier)
+   __DATE__             date de compilation ("Sep 16 2026")
+   __TIME__             heure de compilation ("14:30:00")
+   __STDC__             vaut 1 si le compilateur suit la norme
+   __STDC_VERSION__     version de la norme : 199901L (C99), 201112L (C11),
+                        201710L (C17), 202311L (C23)
+   __STDC_HOSTED__      1 avec bibliothèque, 0 en freestanding (chapitre 15)
+   __func__             nom de la fonction en cours. Techniquement ce n'est
+                        pas une macro mais une variable implicite.
+
+   #define ERREUR(msg) \
+       printf("%s:%d dans %s() : %s\n", __FILE__, __LINE__, __func__, msg)
+
+
+EXERCICES DU CHAPITRE 11
+------------------------
+11.1 Écris une macro TAILLE_TABLEAU(t) qui renvoie le nombre d'éléments d'un
+     tableau. Pourquoi ne marche-t-elle pas sur un pointeur ?
+11.2 Écris une macro BIT(n) et des macros SET_BIT, CLEAR_BIT, TEST_BIT.
+11.3 Explique ce que donne MAX(i++, j++) avec la macro MAX du 11.2.
+
+
+================================================================================
+ 12. CE QUI SE PASSE À LA COMPILATION
+================================================================================
+
+12.1 sizeof
+-----------
+Donne la taille en octets d'un type ou d'une expression, de type size_t.
+   sizeof(int)          // parenthèses obligatoires pour un type
+   sizeof x             // facultatives pour une expression
+   sizeof(t) / sizeof(t[0])   // nombre d'éléments d'un tableau
+
+L'expression n'est PAS exécutée :
+   int i = 0;
+   size_t s = sizeof(i++);    // i vaut toujours 0
+(Exception : un VLA, dont la taille n'est connue qu'à l'exécution.)
+
+sizeof(char) vaut 1 par définition.
+
+
+12.2 alignof et alignas
+-----------------------
+   alignof(type)     alignement exigé par un type (C23 ; _Alignof en C11)
+      alignof(int)      vaut 4
+      alignof(double)   vaut 8
+
+   alignas(n)        impose un alignement minimal (C23 ; _Alignas en C11)
+      alignas(16) int x;          // x sera à une adresse multiple de 16
+      alignas(4096) char page[4096];
+   Utile pour les instructions SIMD ou les structures matérielles.
+
+
+12.3 static_assert
+------------------
+Vérifie une condition À LA COMPILATION. Si elle est fausse, la compilation
+échoue avec le message.
+   static_assert(sizeof(int) == 4, "int doit faire 4 octets");
+   static_assert(sizeof(struct entete) == 512);   // message facultatif en C23
+(_Static_assert en C11.) Parfait pour vérifier la taille d'une structure qui
+doit correspondre à un format binaire.
+
+
+12.4 _Generic : choisir selon le type
+-------------------------------------
+Sélectionne une expression selon le TYPE d'une autre expression. Ça permet une
+forme de surcharge.
+
+   #define NOM_TYPE(x) _Generic((x),   \
+       int:     "int",                 \
+       double:  "double",              \
+       char *:  "chaine",              \
+       default: "autre")
+
+   printf("%s\n", NOM_TYPE(3.0));      // double
+
+   #define ABS(x) _Generic((x), int: abs_int, double: abs_double)(x)
+   // appelle la bonne fonction selon le type de x
+
+
+12.5 typeof et typeof_unqual (C23)
+----------------------------------
+   int a = 5;
+   typeof(a) b = 10;            // b est un int
+   typeof(int *) p, q;          // p ET q sont des pointeurs (contrairement à
+                                // int *p, q;)
+
+typeof_unqual retire les qualificateurs (const, volatile...) :
+   const int c = 1;
+   typeof_unqual(c) d = 2;      // d est un int modifiable
+
+Macro MAX sûre (chaque argument évalué une seule fois) :
+   #define MAX(a, b) ({ typeof(a) _a = (a); typeof(b) _b = (b); \
+                        _a > _b ? _a : _b; })
+(Les ({ ... }) sont une extension gcc/clang, pas du C standard.)
+
+
+================================================================================
+ 13. LES NOUVEAUTÉS DE C23 EN RÉSUMÉ
+================================================================================
+
+Beaucoup ont déjà été vues. Récapitulatif :
+
+   bool, true, false         mots-clés, plus besoin de <stdbool.h>
+   nullptr                   pointeur nul typé (type nullptr_t)
+   auto x = 5;               déduction de type
+   constexpr                 vraies constantes de compilation
+   typeof, typeof_unqual     type d'une expression
+   static_assert, alignas,   écrits sans le _ initial (anciennes formes
+   alignof, thread_local     toujours acceptées)
+   0b1010                    littéraux binaires
+   1'000'000                 séparateur de chiffres
+   {}                        initialisation à zéro : int t[10] = {};
+   enum e : uint8_t { }      type sous-jacent des enum
+   _BitInt(N)                entier d'exactement N bits :
+                                unsigned _BitInt(12) x = 4095;
+   _Decimal32/64/128         flottants décimaux (support encore partiel)
+   int f()                   veut dire "aucun paramètre", comme f(void)
+   #embed                    inclure un fichier binaire
+   #elifdef, #elifndef       raccourcis du préprocesseur
+   #warning                  avertissement
+   __VA_OPT__                virgule optionnelle dans les macros variadiques
+
+Les ATTRIBUTS, entre [[ ]], donnent des informations au compilateur :
+
+   [[nodiscard]]             avertit si la valeur de retour est ignorée
+      [[nodiscard]] bool ecrire_disque(void);
+      ecrire_disque();       // avertissement : résultat ignoré
+
+   [[maybe_unused]]          pas d'avertissement si inutilisé
+      void f([[maybe_unused]] int param) { }
+
+   [[deprecated]]            avertit à chaque utilisation
+      [[deprecated("utiliser nouvelle_f")]] void vieille_f(void);
+
+   [[fallthrough]]           case sans break volontaire (4.2)
+
+   [[noreturn]]              la fonction ne revient jamais (5.7)
+
+   [[reproducible]]          la fonction ne dépend que de ses arguments et ne
+   [[unsequenced]]           modifie rien d'observable (unsequenced est encore
+                             plus strict) : aide à l'optimisation
+
+Déclaré obsolète en C23 : _Noreturn (utilise [[noreturn]]).
+Supprimé en C23 : les définitions de fonctions à l'ancienne mode K&R
+(int f(a, b) int a, b; { ... }). Et C23 impose enfin le complément à deux pour
+représenter les entiers négatifs (c'était déjà le cas sur toutes les machines
+actuelles).
+
+
+================================================================================
+ 14. LE COMPORTEMENT INDÉFINI : LES PIÈGES MORTELS DU C
+================================================================================
+
+14.1 Trois notions à distinguer
+-------------------------------
+- Comportement DÉFINI PAR L'IMPLÉMENTATION : le résultat dépend du compilateur
+  ou de la machine, mais il est documenté et cohérent.
+     Exemples : taille de int, signe de char, décalage à droite d'un négatif.
+
+- Comportement NON SPÉCIFIÉ : plusieurs résultats possibles, le compilateur
+  choisit sans avoir à le dire.
+     Exemple : l'ordre d'évaluation des arguments. Dans f(a(), b()), a() peut
+     être appelée avant ou après b().
+
+- Comportement INDÉFINI (undefined behavior, UB) : la norme n'impose RIEN.
+  Le programme peut planter, donner un résultat faux, marcher par hasard
+  aujourd'hui et plus demain, ou marcher en -O0 et casser en -O2.
+
+
+14.2 Pourquoi l'UB est si dangereux
+-----------------------------------
+Le compilateur a le droit de SUPPOSER qu'un comportement indéfini n'arrive
+jamais, et il optimise en conséquence. Exemple :
+
+   int deborde(int x)
+   {
+       if (x + 1 < x)          // "détecter" le débordement
+           return 1;
+       return 0;
+   }
+
+Le débordement d'un int signé est indéfini. Le compilateur raisonne donc :
+"x + 1 est toujours plus grand que x", et en -O2 il remplace toute la fonction
+par return 0. Ton test a disparu.
+Bonne façon : if (x == INT_MAX)   (INT_MAX vient de <limits.h>)
+En C23, <stdckdint.h> fournit ckd_add(&resultat, a, b), qui renvoie true en
+cas de débordement.
+
+
+14.3 Liste des comportements indéfinis les plus courants
+--------------------------------------------------------
+ 1. Lire une variable locale non initialisée.
+ 2. Débordement d'un entier SIGNÉ (INT_MAX + 1).
+    (Les unsigned, eux, reviennent à 0 : c'est défini.)
+ 3. Division ou modulo par zéro. INT_MIN / -1 aussi.
+ 4. Accès hors des bornes d'un tableau.
+ 5. Déréférencer un pointeur nul, non initialisé ou pendant.
+ 6. Modifier une variable deux fois sans point de séquence : i = i++;
+ 7. Décaler de plus de bits que la taille du type, ou décaler à gauche un
+    nombre négatif.
+ 8. Modifier une chaîne littérale.
+ 9. Modifier un objet déclaré const (en retirant le const par un cast).
+10. Lire un objet via un pointeur d'un type incompatible (strict aliasing).
+11. Utiliser la valeur d'une fonction non void qui s'est terminée sans return.
+12. Violer une promesse restrict.
+13. Convertir un flottant en entier alors que la valeur ne tient pas dans le
+    type : (int)1e20.
+14. Comparer avec < deux pointeurs qui ne pointent pas dans le même tableau.
+
+
+14.4 Se protéger
+----------------
+   - Compile avec -Wall -Wextra et corrige TOUS les avertissements.
+   - Pendant les tests : -fsanitize=address,undefined
+   - Initialise toutes tes variables.
+   - Vérifie les bornes et les pointeurs.
+   - Utilise des unsigned pour les manipulations de bits.
+   - En cas de doute sur une expression, découpe-la en plusieurs lignes.
+
+
+================================================================================
+ 15. LE C SANS BIBLIOTHÈQUE (FREESTANDING)
+================================================================================
+
+15.1 Hosted et freestanding
+---------------------------
+La norme définit deux environnements :
+
+- HOSTED (hébergé) : programme classique qui tourne sur un système
+  d'exploitation. Toute la bibliothèque standard est disponible et le
+  programme commence par main.
+
+- FREESTANDING (autonome) : noyau, bootloader, microcontrôleur. Pas de système
+  en dessous, donc pas de printf, pas de malloc, pas de fichiers. Le point
+  d'entrée est défini par l'environnement (ce n'est pas forcément main).
+
+Le LANGAGE reste entièrement disponible : tous les mots-clés, opérateurs,
+pointeurs, structures et le préprocesseur fonctionnent pareil.
+
+
+15.2 Les en-têtes toujours disponibles
+--------------------------------------
+Ces en-têtes ne contiennent que des types et des macros, aucun code à lier.
+Ils sont fournis par le compilateur lui-même :
+   <stddef.h>      size_t, ptrdiff_t, NULL, offsetof, nullptr_t
+   <stdint.h>      int8_t, uint32_t, uintptr_t, INT32_MAX...
+   <stdbool.h>     bool, true, false (inutile en C23)
+   <stdarg.h>      va_list, va_start, va_arg, va_end
+   <limits.h>      INT_MAX, CHAR_BIT, UINT_MAX...
+   <float.h>       FLT_MAX, DBL_EPSILON...
+   <iso646.h>      and, or, not... (synonymes des opérateurs)
+   <stdalign.h>    alignas, alignof (inutile en C23)
+   <stdnoreturn.h> noreturn (obsolète en C23)
+C23 en ajoute quelques-uns, dont <stdbit.h> (manipulation de bits) et
+<stdckdint.h> (calculs avec détection de débordement).
+
+
+15.3 Les options de compilation
+-------------------------------
+   -ffreestanding          indique au compilateur l'environnement autonome
+   -nostdlib               ne lie ni la bibliothèque standard ni le code de
+                           démarrage (crt0)
+   -fno-builtin            n'utilise pas les versions internes des fonctions
+                           standard
+   -fno-stack-protector    désactive la protection de pile (elle appelle une
+                           fonction de la libc)
+
+Pour du code noyau x86-64, on ajoute souvent :
+   -mno-red-zone           indispensable si des interruptions peuvent survenir
+                           pendant l'exécution du code noyau
+   -mgeneral-regs-only     pas de registres SSE/AVX (évite d'avoir à les
+                           sauvegarder lors des interruptions)
+   -mcmodel=kernel         pour un noyau placé dans les adresses hautes
+
+PIÈGE IMPORTANT : même en freestanding, gcc peut générer tout seul des appels
+à memcpy, memset, memmove et memcmp (par exemple pour copier une grosse
+structure ou initialiser un tableau). Tu dois donc écrire ces quatre fonctions
+toi-même, sinon l'édition de liens échoue.
+
+   void *memset(void *zone, int valeur, size_t n)
+   {
+       unsigned char *p = zone;
+       while (n--)
+           *p++ = (unsigned char)valeur;
+       return zone;
+   }
+
+   void *memcpy(void *restrict dest, const void *restrict src, size_t n)
+   {
+       unsigned char *d = dest;
+       const unsigned char *s = src;
+       while (n--)
+           *d++ = *s++;
+       return dest;
+   }
+
+
+15.4 Exemple complet : un programme Linux sans libc, en C et NASM
+-----------------------------------------------------------------
+Le point d'entrée _start est écrit en assembleur, il appelle une fonction C.
+Pour afficher du texte, on fait l'appel système write directement.
+
+Convention d'appel System V AMD64 (Linux x86-64), à connaître pour mélanger
+C et assembleur :
+   - arguments entiers et pointeurs dans : rdi, rsi, rdx, rcx, r8, r9
+   - valeur de retour dans : rax (eax pour un int)
+   - registres à préserver par la fonction appelée : rbx, rbp, r12 à r15
+   - la pile doit être alignée sur 16 octets au moment du call
+
+--- entree.asm ---
+   bits 64
+
+   global _start
+   global sys_write
+   global sys_exit
+   extern principal
+
+   section .text
+
+   _start:
+       call principal          ; appelle la fonction C
+       mov edi, eax            ; 1er argument de sys_exit = valeur renvoyée
+       call sys_exit           ; ne revient jamais
+
+   ; long sys_write(int fd, const char *tampon, size_t taille)
+   sys_write:
+       mov rax, 1              ; numéro de l'appel système write
+       syscall                 ; rdi, rsi, rdx contiennent déjà les arguments
+       ret
+
+   ; void sys_exit(int code)
+   sys_exit:
+       mov rax, 60             ; numéro de l'appel système exit
+       syscall
+
+   section .note.GNU-stack noalloc noexec nowrite progbits
+
+--- principal.c ---
+   #include <stddef.h>
+
+   long sys_write(int fd, const char *tampon, size_t taille);
+   [[noreturn]] void sys_exit(int code);
+
+   static size_t longueur(const char *s)
+   {
+       const char *debut = s;
+       while (*s != '\0')
+           s++;
+       return (size_t)(s - debut);
+   }
+
+   static void afficher(const char *s)
+   {
+       sys_write(1, s, longueur(s));      // 1 = sortie standard
+   }
+
+   int principal(void)
+   {
+       afficher("Bonjour, sans aucune bibliothèque !\n");
+       return 42;
+   }
+
+--- Compilation ---
+   nasm -f elf64 entree.asm -o entree.o
+   gcc -std=c23 -Wall -Wextra -ffreestanding -fno-stack-protector \
+       -fno-builtin -c principal.c -o principal.o
+   ld entree.o principal.o -o sans_libc
+   ./sans_libc
+   echo $?                                  (affiche 42)
+
+Grâce à la convention d'appel, sys_write n'a même pas besoin de déplacer ses
+arguments : le C les a déjà rangés dans rdi, rsi et rdx, exactement là où
+l'appel système les attend.
+
+Pour aller plus loin : "objdump -d -M intel principal.o" montre l'assembleur
+généré par gcc pour ton code C.
+
+
+================================================================================
+ 16. ANNEXES
+================================================================================
+
+16.1 Priorité et associativité des opérateurs
+---------------------------------------------
+Du plus prioritaire (haut) au moins prioritaire (bas).
+
+   Niv  Opérateurs                              Associativité
+   ---  --------------------------------------  -------------------
+    1   ()  []  ->  .  x++  x--                 gauche à droite
+        (appel, indice, membre, suffixes)
+    2   ++x  --x  +x  -x  !  ~  (type)  *p  &x  droite à gauche
+        sizeof  alignof
+    3   *  /  %                                 gauche à droite
+    4   +  -                                    gauche à droite
+    5   <<  >>                                  gauche à droite
+    6   <  <=  >  >=                            gauche à droite
+    7   ==  !=                                  gauche à droite
+    8   &                                       gauche à droite
+    9   ^                                       gauche à droite
+   10   |                                       gauche à droite
+   11   &&                                      gauche à droite
+   12   ||                                      gauche à droite
+   13   ?:                                      droite à gauche
+   14   =  +=  -=  *=  /=  %=  <<=  >>=         droite à gauche
+        &=  ^=  |=
+   15   ,                                       gauche à droite
+
+Les pièges qui en découlent :
+   *p++        = *(p++)          (niveau 1 avant niveau 2)
+   *p.x        = *(p.x)          d'où l'existence de p->x
+   a & b == c  = a & (b == c)    (niveau 7 avant niveau 8)
+   a << 1 + 2  = a << 3          (niveau 4 avant niveau 5)
+   int *t[3]   tableau de pointeurs ([] avant *)
+
+
+16.2 Tous les mots-clés du C (jusqu'à C23)
+------------------------------------------
+Types        : void char short int long float double signed unsigned
+               bool _Bool _Complex _Imaginary _BitInt
+               _Decimal32 _Decimal64 _Decimal128
+Composés     : struct union enum typedef typeof typeof_unqual
+Qualificat.  : const volatile restrict _Atomic
+Stockage     : auto register static extern thread_local _Thread_local
+               constexpr inline _Noreturn
+Contrôle     : if else switch case default for while do break continue
+               goto return
+Compilation  : sizeof alignof _Alignof alignas _Alignas
+               static_assert _Static_assert _Generic
+Constantes   : true false nullptr
+Préprocess.  : #include #define #undef #if #elif #else #endif #ifdef #ifndef
+               #elifdef #elifndef #error #warning #pragma #line #embed
+               defined __has_include __has_embed __has_c_attribute
+
+
+16.3 Messages d'erreur fréquents et leur signification
+------------------------------------------------------
+   "implicit declaration of function 'xxx'"
+       Fonction utilisée sans prototype : #include ou prototype manquant.
+
+   "expected ';' before ..."
+       Point-virgule oublié, souvent à la ligne PRÉCÉDENTE (ou après une
+       structure).
+
+   "undefined reference to 'xxx'"
+       Erreur de l'éditeur de liens : fonction déclarée mais jamais définie,
+       ou fichier .c oublié dans la commande de compilation.
+
+   "multiple definition of 'xxx'"
+       Variable ou fonction définie dans un .h inclus par plusieurs .c.
+
+   "assignment to 'int *' from 'int' makes pointer from integer"
+       Tu mets un entier dans un pointeur : & ou * oublié.
+
+   "incompatible pointer types"
+       Pointeurs de types différents : souvent un & en trop ou en moins.
+
+   "function returns address of local variable"
+       Pointeur pendant (8.18).
+
+   "suggest parentheses around assignment used as truth value"
+       if (x = 5) au lieu de if (x == 5).
+
+   "comparison of integer expressions of different signedness"
+       Mélange signé / non signé (2.8).
+
+   "Segmentation fault (core dumped)"   (à l'exécution)
+       Accès mémoire interdit : pointeur nul, non initialisé, pendant, ou
+       sortie de tableau. Lance gdb puis "backtrace".
+
+
+16.4 Bonnes pratiques
+---------------------
+   - Compile toujours avec -Wall -Wextra, zéro avertissement.
+   - Initialise toutes les variables, surtout les pointeurs.
+   - Déclare les variables au plus près de leur utilisation.
+   - Utilise const partout où c'est possible.
+   - Passe la taille avec chaque tableau.
+   - Préfère static inline aux macros avec paramètres.
+   - Une fonction = une tâche. Si elle dépasse un écran, découpe-la.
+   - Nomme clairement : nb_elements plutôt que n2.
+   - Lis l'assembleur généré de temps en temps : c'est la meilleure façon de
+     comprendre ce que fait vraiment ton code.
+
+
+16.5 Pour aller plus loin
+-------------------------
+   - "Le langage C" de Kernighan et Ritchie (le livre des créateurs du C,
+     vieux mais toujours excellent pour les bases).
+   - "Modern C" de Jens Gustedt (C moderne, disponible gratuitement en
+     ligne par son auteur).
+   - cppreference.com, section C : la référence la plus pratique.
+   - Les pages de manuel : man 3 printf, man 2 write (appels système).
+   - Le wiki OSDev (wiki.osdev.org) pour le C freestanding et les noyaux.
+
+
+================================================================================
+ 17. CORRIGÉS DES EXERCICES
+================================================================================
+
+Essaie vraiment avant de regarder. Il existe souvent plusieurs bonnes
+solutions : si la tienne marche et compile sans avertissement, elle est bonne.
+
+--- 2.1 ---
+   printf("char        : %zu\n", sizeof(char));
+   printf("short       : %zu\n", sizeof(short));
+   printf("int         : %zu\n", sizeof(int));
+   printf("long        : %zu\n", sizeof(long));
+   printf("long long   : %zu\n", sizeof(long long));
+   printf("float       : %zu\n", sizeof(float));
+   printf("double      : %zu\n", sizeof(double));
+   printf("long double : %zu\n", sizeof(long double));
+   Sur Arch Linux x86-64 : 1, 2, 4, 8, 8, 4, 8, 16.
+
+--- 2.2 ---
+   unsigned char c = 255;
+   c = c + 1;
+   printf("%d\n", c);        // 0
+   Un unsigned char va de 0 à 255. Les unsigned calculent "modulo 2^n" :
+   255 + 1 = 256, et 256 modulo 256 = 0. Ce retour à zéro est DÉFINI pour les
+   unsigned (pour un signé, ce serait un comportement indéfini).
+
+--- 2.3 ---
+   7 / 2             = 3     (division entière)
+   7.0 / 2           = 3.5   (un double dans le calcul -> division réelle)
+   (double)(7 / 2)   = 3.0   (division entière d'abord, conversion ensuite)
+   7 / 2.0           = 3.5
+
+--- 3.1 ---
+   bool bissextile = (annee % 4 == 0 && annee % 100 != 0) || annee % 400 == 0;
+
+--- 3.2 ---
+   uint8_t reg = 0b00000000;
+   reg |= (1u << 0) | (1u << 3);    // 0b00001001 = 0x09
+   reg ^= (1u << 7);                // 0b10001001 = 0x89
+   reg &= ~(1u << 0);               // 0b10001000 = 0x88
+   printf("0x%02x\n", reg);         // 0x88
+
+--- 3.3 ---
+   a ^= b;     // a contient a^b
+   b ^= a;     // b = b^(a^b) = a
+   a ^= b;     // a = (a^b)^a = b
+   Ne marche pas si a et b sont la même variable (via des pointeurs) : le
+   résultat serait 0. Une variable temporaire est plus claire et aussi rapide.
+
+--- 4.1 ---
+   for (int ligne = 1; ligne <= 10; ligne++) {
+       for (int col = 1; col <= 10; col++)
+           printf("%4d", ligne * col);
+       printf("\n");
+   }
+
+--- 4.2 ---
+   for (int i = 1; i <= 100; i++) {
+       if (i % 15 == 0)      printf("FizzBuzz\n");
+       else if (i % 3 == 0)  printf("Fizz\n");
+       else if (i % 5 == 0)  printf("Buzz\n");
+       else                  printf("%d\n", i);
+   }
+   Le test de 15 doit venir EN PREMIER, sinon "Fizz" l'emporte.
+
+--- 4.3 ---
+   int n = 987654, somme = 0;
+   while (n > 0) {
+       somme += n % 10;      // dernier chiffre
+       n /= 10;              // on retire le dernier chiffre
+   }
+   printf("%d\n", somme);    // 39
+
+--- 5.1 ---
+   int pgcd(int a, int b)                 // version boucle
+   {
+       while (b != 0) {
+           int r = a % b;
+           a = b;
+           b = r;
+       }
+       return a;
+   }
+
+   int pgcd_rec(int a, int b)             // version récursive
+   {
+       return b == 0 ? a : pgcd_rec(b, a % b);
+   }
+
+--- 5.2 ---
+   bool est_premier(int n)
+   {
+       if (n < 2)
+           return false;
+       for (int d = 2; d <= n / d; d++)   // d <= n / d évite de calculer d*d,
+           if (n % d == 0)                // qui pourrait déborder
+               return false;
+       return true;
+   }
+
+--- 5.3 ---
+   int puissance(int base, unsigned exp)
+   {
+       int resultat = 1;
+       while (exp-- > 0)
+           resultat *= base;
+       return resultat;
+   }
+
+--- 6.1 ---
+   int maximum(const int t[], size_t n)   // suppose n >= 1
+   {
+       int m = t[0];
+       for (size_t i = 1; i < n; i++)
+           if (t[i] > m)
+               m = t[i];
+       return m;
+   }
+
+--- 6.2 ---
+   void inverser(int t[], size_t n)
+   {
+       for (size_t i = 0; i < n / 2; i++) {
+           int tmp = t[i];
+           t[i] = t[n - 1 - i];
+           t[n - 1 - i] = tmp;
+       }
+   }
+
+--- 6.3 ---
+   void tri_bulles(int t[], size_t n)
+   {
+       for (size_t passe = 0; passe + 1 < n; passe++) {
+           bool echange = false;
+           for (size_t i = 0; i + 1 < n - passe; i++) {
+               if (t[i] > t[i + 1]) {
+                   int tmp = t[i];
+                   t[i] = t[i + 1];
+                   t[i + 1] = tmp;
+                   echange = true;
+               }
+           }
+           if (!echange)
+               break;                   // déjà trié : on s'arrête
+       }
+   }
+   On écrit "passe + 1 < n" plutôt que "passe < n - 1" : si n vaut 0, n - 1
+   sur un size_t (unsigned) donnerait un nombre énorme.
+
+--- 7.1 ---
+   void ma_copie(char dest[], const char src[])
+   {
+       size_t i = 0;
+       while (src[i] != '\0') {
+           dest[i] = src[i];
+           i++;
+       }
+       dest[i] = '\0';                  // ne pas oublier la fin
+   }
+
+   int ma_comparaison(const char a[], const char b[])
+   {
+       size_t i = 0;
+       while (a[i] != '\0' && a[i] == b[i])
+           i++;
+       return (unsigned char)a[i] - (unsigned char)b[i];
+   }
+   Renvoie 0 si identiques, un négatif si a est avant b, un positif sinon
+   (c'est le fonctionnement de strcmp).
+
+--- 7.2 ---
+   bool palindrome(const char s[])
+   {
+       size_t n = longueur(s);          // fonction du 7.2
+       for (size_t i = 0; i < n / 2; i++)
+           if (s[i] != s[n - 1 - i])
+               return false;
+       return true;
+   }
+
+--- 7.3 ---
+   int en_entier(const char s[])
+   {
+       int signe = 1, resultat = 0;
+       size_t i = 0;
+       if (s[0] == '-') {
+           signe = -1;
+           i = 1;
+       }
+       for (; s[i] >= '0' && s[i] <= '9'; i++)
+           resultat = resultat * 10 + (s[i] - '0');
+       return signe * resultat;
+   }
+   (Ne gère pas le débordement pour des nombres trop grands.)
+
+--- 8.1 ---
+   int x = 10;
+   int *p = &x;
+   int **pp = &p;
+   **pp = 99;                                     // x vaut 99
+
+   printf("&x  = %p\n", (void *)&x);
+   printf("&p  = %p\n", (void *)&p);
+   printf("&pp = %p\n", (void *)&pp);
+   printf("p   = %p   (= &x)\n", (void *)p);
+   printf("*p  = %d\n", *p);                      // 99
+   printf("pp  = %p   (= &p)\n", (void *)pp);
+   printf("*pp = %p   (= p = &x)\n", (void *)*pp);
+   printf("**pp= %d\n", **pp);                    // 99
+
+--- 8.2 ---
+   void min_max(const int *t, size_t n, int *min, int *max)   // n >= 1
+   {
+       *min = *max = t[0];
+       for (size_t i = 1; i < n; i++) {
+           if (t[i] < *min) *min = t[i];
+           if (t[i] > *max) *max = t[i];
+       }
+   }
+
+   int tab[] = {4, -2, 9, 0};
+   int mn, mx;
+   min_max(tab, 4, &mn, &mx);       // mn = -2, mx = 9
+
+--- 8.3 ---
+   size_t longueur(const char *s)
+   {
+       const char *fin = s;
+       while (*fin)
+           fin++;
+       return (size_t)(fin - s);
+   }
+
+   void inverser(int *t, size_t n)
+   {
+       if (n == 0)
+           return;
+       int *gauche = t;
+       int *droite = t + n - 1;
+       while (gauche < droite) {
+           int tmp = *gauche;
+           *gauche++ = *droite;
+           *droite-- = tmp;
+       }
+   }
+
+   bool palindrome(const char *s)
+   {
+       const char *fin = s + longueur(s);   // pointe sur le '\0'
+       while (s < fin) {
+           fin--;
+           if (*s != *fin)
+               return false;
+           s++;
+       }
+       return true;
+   }
+   Dans palindrome, on décrémente fin AVANT de l'utiliser : il part du '\0',
+   une case après le dernier caractère. On ne crée ainsi jamais de pointeur
+   AVANT le début de la chaîne (ce qui serait un comportement indéfini, même
+   sans le déréférencer).
+
+--- 8.4 ---
+   bool croissant(int a, int b)   { return a < b; }
+   bool decroissant(int a, int b) { return a > b; }
+
+   void trier(int *t, size_t n, bool (*avant)(int, int))
+   {
+       for (size_t passe = 0; passe + 1 < n; passe++)
+           for (size_t i = 0; i + 1 < n - passe; i++)
+               if (avant(t[i + 1], t[i])) {     // le suivant doit passer avant
+                   int tmp = t[i];
+                   t[i] = t[i + 1];
+                   t[i + 1] = tmp;
+               }
+   }
+
+   int tab[] = {5, 1, 4, 2};
+   trier(tab, 4, croissant);        // {1, 2, 4, 5}
+   trier(tab, 4, decroissant);      // {5, 4, 2, 1}
+
+   C'est exactement le principe de qsort, la fonction de tri de la
+   bibliothèque standard, qui reçoit un pointeur de fonction de comparaison.
+
+--- 8.5 ---
+   double d = 1.0;
+   unsigned char *o = (unsigned char *)&d;
+   for (size_t i = 0; i < sizeof(d); i++)
+       printf("%02x ", o[i]);
+   // 00 00 00 00 00 00 f0 3f
+   En little-endian, l'octet de poids faible vient en premier. Lu à l'envers :
+   0x3FF0000000000000, la représentation IEEE 754 de 1.0 (signe 0, exposant
+   0x3FF = 1023 soit 2^0, mantisse 0).
+
+--- 8.6 ---
+   int *f(void) { int t[3] = {1, 2, 3}; return t; }
+      Renvoie l'adresse d'un tableau local détruit à la sortie de f :
+      pointeur pendant. Solution : faire passer le tableau par l'appelant.
+
+   void g(int *p) { p = nullptr; }
+      p est une COPIE du pointeur : on modifie la copie, l'original ne change
+      pas. Pour modifier un pointeur, il faut son adresse :
+      void g(int **p) { *p = nullptr; }     appel : g(&mon_pointeur);
+
+   char *s = "abc"; s[0] = 'A';
+      Modification d'une chaîne littérale : comportement indéfini.
+      Solution : char s[] = "abc";   (tableau modifiable)
+
+--- 9.1 ---
+   struct date { int jour, mois, annee; };
+
+   bool avant(const struct date *a, const struct date *b)
+   {
+       if (a->annee != b->annee) return a->annee < b->annee;
+       if (a->mois  != b->mois)  return a->mois  < b->mois;
+       return a->jour < b->jour;
+   }
+
+--- 9.2 ---
+   struct personne *plus_age(struct personne *t, size_t n)   // n >= 1
+   {
+       struct personne *max = &t[0];
+       for (size_t i = 1; i < n; i++)
+           if (t[i].age > max->age)
+               max = &t[i];
+       return max;
+   }
+   On renvoie un pointeur vers un élément du tableau de l'appelant : il reste
+   valide après la fonction (contrairement à 8.6).
+
+--- 9.3 ---
+   struct noeud { int valeur; struct noeud *suivant; };
+
+   struct noeud *inverser_liste(struct noeud *tete)
+   {
+       struct noeud *precedent = nullptr;
+       while (tete != nullptr) {
+           struct noeud *suivant = tete->suivant;   // on garde la suite
+           tete->suivant = precedent;               // on retourne la flèche
+           precedent = tete;                        // on avance
+           tete = suivant;
+       }
+       return precedent;                            // nouvelle tête
+   }
+
+   struct noeud n[5];
+   for (int i = 0; i < 5; i++) {
+       n[i].valeur = (i + 1) * 10;
+       n[i].suivant = (i < 4) ? &n[i + 1] : nullptr;
+   }
+   struct noeud *tete = inverser_liste(&n[0]);      // 50 40 30 20 10
+
+--- 9.4 ---
+   printf("%zu\n", sizeof(struct exemple));              // 12
+   printf("%zu\n", offsetof(struct exemple, a));         // 0
+   printf("%zu\n", offsetof(struct exemple, b));         // 4
+   printf("%zu\n", offsetof(struct exemple, c));         // 8
+   Les trous entre les positions et les tailles des champs sont le
+   remplissage.
+
+--- 10.1 ---
+   liste.h : include guard, définition de struct noeud, prototypes
+             (inverser_liste, afficher_liste).
+   liste.c : #include "liste.h" et définitions des fonctions.
+   main.c  : #include "liste.h", construction de la liste, appels.
+   Compilation : gcc -std=c23 -Wall -Wextra main.c liste.c -o liste
+
+--- 10.2 ---
+   compteur.h :
+      #ifndef COMPTEUR_H
+      #define COMPTEUR_H
+      void incrementer(void);
+      int valeur(void);
+      #endif
+
+   compteur.c :
+      #include "compteur.h"
+      static int compte = 0;       // invisible depuis les autres fichiers
+      void incrementer(void) { compte++; }
+      int valeur(void) { return compte; }
+
+   Dans main.c, écrire compte = 100; donne une erreur : compte est privé.
+
+--- 11.1 ---
+   #define TAILLE_TABLEAU(t) (sizeof(t) / sizeof((t)[0]))
+   Sur un pointeur, sizeof(t) donne la taille du pointeur (8) et non celle
+   des données : avec un int *, on obtient 8 / 4 = 2, quel que soit le
+   nombre réel d'éléments. gcc avertit dans ce cas (-Wsizeof-pointer-div).
+
+--- 11.2 ---
+   #define BIT(n)            (1u << (n))
+   #define SET_BIT(x, n)     ((x) |= BIT(n))
+   #define CLEAR_BIT(x, n)   ((x) &= ~BIT(n))
+   #define TEST_BIT(x, n)    (((x) >> (n)) & 1u)
+
+--- 11.3 ---
+   MAX(i++, j++) devient ((i++) > (j++) ? (i++) : (j++))
+   Avec i = 5 et j = 3 : on compare 5 > 3 (i passe à 6, j à 4), la condition
+   est vraie, donc on évalue i++ une DEUXIÈME fois : le résultat vaut 6 et i
+   finit à 7. Le plus grand des deux est incrémenté deux fois.
+   Ce n'est pas un comportement indéfini (l'opérateur ?: garantit l'ordre),
+   mais c'est un bug. D'où la règle : jamais d'effet de bord dans les
+   arguments d'une macro.
+
+
+================================================================================
+                               FIN DU COURS
+     Prochaine étape : écris un vrai petit projet (un gestionnaire de liste
+     de tâches, un interpréteur de calculatrice, un mini-shell...). C'est en
+     construisant quelque chose que tout ce qui précède devient naturel.
+================================================================================
