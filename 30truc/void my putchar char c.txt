@@ -46,7 +46,7 @@ my_find_prime_sup X
 my_strcpy -
 my_strncpy -
 my_revstr - 
-my_strstr -  
+my_strstr - O
 my_strcmp -
 my_strncmp -
 my_strupcase -
@@ -57,7 +57,7 @@ my_str_isnum -
 my_str_islower - 
 my_str_isupper -
 my_str_isprintable -
-my_showstr X
+my_showstr X O
 my_showmem X
 my_strcat -
 my_strncat 
