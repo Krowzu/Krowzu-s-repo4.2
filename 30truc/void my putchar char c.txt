@@ -37,7 +37,7 @@ my_put_nbr -
 my_swap -
 my_putstr -
 my_strlen -
-my_getnbr -
+my_getnbr - X
 my_sort_int_array -
 my_compute_power_rec -
 my_compute_square_root -
