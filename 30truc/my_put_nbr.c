@@ -9,19 +9,19 @@
 
 int my_put_nbr(int nb)
 {
-    int len = 0;
+    int l = 0;
     char c;
 
     if (nb < 0) {
-        len += write(1, "-", 1);
+        l += write(1, "-", 1);
         if (nb <= -10)
-            len += my_put_nbr(nb / 10);
+            l += my_put_nbr(nb / 10);
         c = -(nb % 10) + '0';
     } else {
         if (nb >= 10)
-            len += my_put_nbr(nb / 10);
+            l += my_put_nbr(nb / 10);
         c = nb % 10 + '0';
     }
-    len += write(1, &c, 1);
-    return len;
+    l += write(1, &c, 1);
+    return l;
 }
