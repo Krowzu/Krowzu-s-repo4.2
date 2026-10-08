@@ -37,12 +37,12 @@ my_put_nbr - ===============================
 my_swap -
 my_putstr -
 my_strlen -
-my_getnbr - =================================
-my_sort_int_array - =========================
+my_getnbr - =================================         
+my_sort_int_array - =========================         O
 my_compute_power_rec -
 my_compute_square_root -
 my_is_prime -
-my_find_prime_sup ============================
+my_find_prime_sup ============================        O
 my_strcpy -
 my_strncpy -
 my_revstr - 
@@ -51,7 +51,7 @@ my_strcmp -
 my_strncmp -
 my_strupcase -
 my_strlowcase -
-my_strcapitalize ===========================
+my_strcapitalize ===========================           O
 my_str_isalpha -
 my_str_isnum - 
 my_str_islower - 
