@@ -5,36 +5,39 @@
 char *file_to_string(char *path)
 {
     char *str;
-    int b;
+    int fd;
     off_t size;
-    b = open(path, O_RDONLY);
-    if (b < 0)
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
         return NULL;
-    size = lseek(b, 0, SEEK_END);
+    size = lseek(fd, 0, SEEK_END);
     if (size < 0)
-        return (close(b), NULL);
-    lseek(b, 0, SEEK_SET);
+        return (close(fd), NULL);
+    lseek(fd, 0, SEEK_SET);
     str = malloc(size + 1);
     if (!str)
-        return (close(b), NULL);
-    if (read(b, str, size) != size)
-        return (close(b), free(str), NULL);
+        return (close(fd), NULL);
+    if (read(fd, str, size) != size)
+        return (close(fd), free(str), NULL);
     str[size] = '\0';
-    close(b);
+    close(fd);
     return str;
 }
 
-void my_putstr(const char *str)
+void my_putstr(char *str)
 {
-	int i = 0;
+    int i = 0;
+
     while (str[i])
         i++;
-	write(1, str, i);
+    write(1, str, i);
 }
 
 int main(int ac, char **av)
 {
     char *str;
+
     if (ac != 2)
         return 1;
     str = file_to_string(av[1]);
