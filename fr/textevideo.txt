@@ -1,0 +1,22 @@
+Texte à dire (environ 5 minutes)
+
+Slide 1, titre (15 s)
+« Bonjour, je m'appelle [prénom]. Aujourd'hui, je vais vous présenter Setting Up, l'un de mes premiers projets à l'EPITECH. Le but : trouver le plus grand carré libre sur un plan rempli d'obstacles. »
+
+Slide 2, contexte (40 s)
+« Ce projet fait partie du module de programmation élémentaire, en début d'année. L'histoire est simple : on arrive dans un laboratoire en désordre, avec des tables et des machines un peu partout. On doit trouver la plus grande zone carrée libre pour s'installer et travailler. Sur le schéma, les carrés noirs sont les obstacles, et le cadre orange est la plus grande zone libre. Le défi, c'est de la trouver automatiquement, pour n'importe quel plan. »
+
+Slide 3, objectif (40 s)
+« Mon programme reçoit un plateau et renvoie ce même plateau avec le carré marqué par des x. Le plateau peut venir de deux sources : soit un fichier, où un point représente une case libre et un "o" un obstacle, soit un plateau que le programme génère lui-même à partir d'une taille et d'un motif. S'il existe plusieurs carrés de même taille, la consigne impose de garder le plus haut, puis le plus à gauche. »
+
+Slide 4, l'idée (70 s)
+« Pour que ce soit rapide, j'ai utilisé une technique qui s'appelle la programmation dynamique. Je l'explique avec une image : chaque case se pose une seule question, "quel est le plus grand carré qui se termine ici ?". Si la case est un obstacle, la réponse est zéro. Sinon, elle regarde ses trois voisines, celle du dessus, celle de gauche et celle en diagonale, prend la plus petite réponse et ajoute un. Ainsi, on réutilise des calculs déjà faits au lieu de tout recommencer. Sur la grille, le plus grand nombre est 3, et il indique le carré gagnant, entouré en orange. »
+
+Slide 5, difficultés (70 s)
+« J'ai rencontré trois difficultés principales. D'abord, les fichiers invalides : lignes de longueurs différentes, caractères inconnus. J'ai choisi de tout vérifier avant de calculer. En cas d'erreur, le programme écrit un message sur la sortie d'erreur et s'arrête avec le code 84. Ensuite, les égalités entre plusieurs carrés. Je parcours le plateau dans l'ordre, et je ne remplace le carré retenu que si un autre est strictement plus grand. Enfin, les grands plateaux, avec des soucis de mémoire et de lenteur. Je calcule en un seul passage, je libère bien la mémoire et j'ai testé sur de grandes tailles. »
+
+Slide 6, réalisation (40 s)
+« Au final, j'ai un programme qui lit ou génère un plateau, trouve toujours le plus grand carré, respecte la règle d'égalité et gère les erreurs proprement. Voici un exemple : pour un plateau généré de taille 6, le carré de deux sur deux est bien marqué en x. »
+
+Slide 7, leçons et valeur (50 s)
+« Ce que j'ai appris tient en trois mots. La méthode : découper un gros problème en petites questions simples. La rigueur : prévoir les cas limites et les erreurs dès le départ. Et la persévérance : tester, se tromper, corriger, c'est normal. La valeur de ce projet, c'est que c'est ma première vraie démarche d'algorithmique, et elle me sert pour tous les projets suivants. Merci de votre attention ! »
